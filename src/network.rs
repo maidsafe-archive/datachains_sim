@@ -12,18 +12,14 @@ type Digest = [u8; 32];
 
 fn trailing_zeros(hash: Digest) -> u8 {
     let mut result = 0;
+    let mut byte_index = 31;
     loop {
-        let check = result + 1;
-        let byte_index = 31 - (check - 1) / 8;
-        let shift = if check % 8 == 0 { 8 } else { check % 8 };
-        let shifted = (hash[byte_index] >> shift) << shift;
-        if shifted != hash[byte_index] {
+        let zeros = hash[byte_index].trailing_zeros();
+        result += zeros;
+        if zeros < 8 || byte_index == 0 {
             break;
         }
-        result += 1;
-        if result == 255 {
-            break;
-        }
+        byte_index -= 1;
     }
     result as u8
 }
@@ -57,7 +53,8 @@ impl Node {
         Node { name, age: 1 }
     }
 
-    pub fn get_older(&mut self) {
+    pub fn relocate<R: Rng>(&mut self, rng: &mut R, prefix: &Prefix) {
+        self.name = prefix.substituted_in(rng.gen());
         self.age += 1;
     }
 
@@ -97,6 +94,14 @@ impl ChurnEvent {
         let serialized = serde_json::to_vec(self).unwrap();
         sha3_256(&serialized)
     }
+
+    fn get_node(&self) -> Option<Node> {
+        match *self {
+            ChurnEvent::PeerAdded(n) |
+            ChurnEvent::PeerRemoved(n) => Some(n),
+            _ => None,
+        }
+    }
 }
 
 enum ChurnResult {
@@ -104,7 +109,7 @@ enum ChurnResult {
     Relocate(Node),
 }
 
-#[derive(Clone, Debug)]
+#[derive(Clone)]
 pub struct Section {
     prefix: Prefix,
     nodes: BTreeMap<u64, Node>,
@@ -223,10 +228,15 @@ impl Section {
     }
 
     fn churn(&mut self, event: ChurnEvent) -> Vec<ChurnResult> {
+        if let Some(node) = event.get_node() {
+            if !node.is_adult() && self.prefix.len() > 4 {
+                return vec![];
+            }
+        }
         let event_hash = event.hash();
         let trailing_zeros = trailing_zeros(event_hash);
         let by_age = self.nodes_by_age();
-        let node_to_age = by_age.into_iter().find(|n| n.age >= trailing_zeros);
+        let node_to_age = by_age.into_iter().find(|n| n.age <= trailing_zeros);
         if let Some(node) = node_to_age {
             self.relocate(node.name())
         } else {
@@ -235,7 +245,21 @@ impl Section {
     }
 }
 
-#[derive(Clone, Debug)]
+impl fmt::Debug for Section {
+    fn fmt(&self, fmt: &mut fmt::Formatter) -> fmt::Result {
+        write!(
+            fmt,
+            "Section {{\n\tprefix: {:?}\n\telders: {}\n\tadults: {}\n\tinfants: {}\n\tall nodes: {:?}\n}}",
+            self.prefix,
+            self.elders.len(),
+            self.adults.len() - self.elders.len(),
+            self.infants.len(),
+            self.nodes.values().collect::<Vec<_>>()
+        )
+    }
+}
+
+#[derive(Clone)]
 pub struct Network {
     nodes: BTreeMap<Prefix, Section>,
     left_nodes: Vec<Node>,
@@ -253,9 +277,11 @@ impl Network {
 
     fn add_node<R: Rng>(&mut self, rng: &mut R, node: Node) {
         let mut should_split = None;
+        let mut churn = vec![];
         for (p, s) in &mut self.nodes {
             if p.matches(node.name()) {
-                s.add(node);
+                println!("Adding node {:?} to section {:?}", node, p);
+                churn.extend(s.add(node));
                 if s.should_split() {
                     should_split = Some(*p);
                 }
@@ -264,11 +290,12 @@ impl Network {
         }
         if let Some(prefix) = should_split {
             let section = self.nodes.remove(&prefix).unwrap();
-            let (section0, section1, churn) = section.split();
+            let (section0, section1, split_churn) = section.split();
             self.nodes.insert(section0.prefix(), section0);
             self.nodes.insert(section1.prefix(), section1);
-            self.handle_churn(rng, churn);
+            churn.extend(split_churn);
         }
+        self.handle_churn(rng, churn);
     }
 
     pub fn add_random_node<R: Rng>(&mut self, rng: &mut R) {
@@ -325,8 +352,8 @@ impl Network {
         churn_results
     }
 
-    fn relocate<R: Rng>(&mut self, rng: &mut R, node: Node) {
-        let new_node = {
+    fn relocate<R: Rng>(&mut self, rng: &mut R, mut node: Node) {
+        {
             let src_section = self.nodes
                 .keys()
                 .find(|&pfx| pfx.matches(node.name()))
@@ -335,13 +362,14 @@ impl Network {
                 .keys()
                 .filter(|&pfx| pfx.is_neighbour(src_section))
                 .collect();
-            let neighbour = rng.choose(&neighbours).unwrap();
-            Node {
-                name: neighbour.substituted_in(node.name()),
-                age: node.age + 1,
-            }
-        };
-        self.add_node(rng, new_node);
+            let neighbour = if let Some(n) = rng.choose(&neighbours) {
+                n
+            } else {
+                src_section
+            };
+            node.relocate(rng, neighbour);
+        }
+        self.add_node(rng, node);
     }
 
     fn handle_churn<R: Rng>(&mut self, rng: &mut R, churn: Vec<ChurnResult>) {
@@ -394,9 +422,21 @@ impl Network {
     }
 
     pub fn rejoin_random_node<R: Rng>(&mut self, rng: &mut R) {
-        let node_index = rng.gen_range(0, self.left_nodes.len());
-        let mut node = self.left_nodes.remove(node_index);
-        node.rejoined();
-        self.add_node(rng, node);
+        rng.shuffle(&mut self.left_nodes);
+        if let Some(mut node) = self.left_nodes.pop() {
+            node.rejoined();
+            self.add_node(rng, node);
+        }
+    }
+}
+
+impl fmt::Debug for Network {
+    fn fmt(&self, fmt: &mut fmt::Formatter) -> fmt::Result {
+        write!(
+            fmt,
+            "Network {{\n\n{:?}\nleft_nodes: {:?}\n\n}}",
+            self.nodes.values(),
+            self.left_nodes
+        )
     }
 }

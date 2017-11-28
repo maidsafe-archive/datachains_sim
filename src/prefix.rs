@@ -22,8 +22,16 @@ impl Prefix {
         }
     }
 
+    pub fn len(&self) -> u8 {
+        self.len
+    }
+
     fn len_mask(&self) -> u64 {
-        (-1i64 as u64) << (64 - self.len)
+        if self.len == 0 {
+            0
+        } else {
+            (-1i64 as u64) << (64 - self.len)
+        }
     }
 
     pub fn shorten(self) -> Prefix {

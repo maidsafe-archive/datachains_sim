@@ -25,7 +25,9 @@ fn random_event<R: Rng>(network: &mut Network, rng: &mut R) {
 fn main() {
     let mut rng = thread_rng();
     let mut network = Network::new();
-    for _ in 0..1000 {
+    for i in 0..1000 {
+        println!("Iteration {}...", i);
         random_event(&mut network, &mut rng);
     }
+    println!("Network state:\n{:?}", network);
 }
