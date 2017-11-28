@@ -3,10 +3,31 @@ use std::fmt;
 use std::iter::Iterator;
 use prefix::Prefix;
 use rand::Rng;
+use serde_json;
+use tiny_keccak::sha3_256;
 
 pub const GROUP_SIZE: usize = 8;
+type Digest = [u8; 32];
 
-#[derive(Clone, Copy, PartialOrd, Ord, PartialEq, Eq)]
+fn trailing_zeros(hash: Digest) -> u8 {
+    let mut result = 0;
+    loop {
+        let check = result + 1;
+        let byte_index = 31 - (check - 1) / 8;
+        let shift = if check % 8 == 0 { 8 } else { check % 8 };
+        let shifted = (hash[byte_index] >> shift) << shift;
+        if shifted != hash[byte_index] {
+            break;
+        }
+        result += 1;
+        if result == 255 {
+            break;
+        }
+    }
+    result as u8
+}
+
+#[derive(Clone, Copy, PartialOrd, Ord, PartialEq, Eq, Serialize, Deserialize)]
 pub struct Node {
     name: u64,
     age: u8,
@@ -62,6 +83,26 @@ impl Node {
     }
 }
 
+#[derive(Serialize, Deserialize)]
+enum ChurnEvent {
+    PeerAdded(Node),
+    PeerRemoved(Node),
+    Merge(Prefix),
+    Split(Prefix),
+}
+
+impl ChurnEvent {
+    fn hash(&self) -> Digest {
+        let serialized = serde_json::to_vec(self).unwrap();
+        sha3_256(&serialized)
+    }
+}
+
+enum ChurnResult {
+    Dropped(Node),
+    Relocate(Node),
+}
+
 #[derive(Clone, Debug)]
 pub struct Section {
     prefix: Prefix,
@@ -82,17 +123,23 @@ impl Section {
         }
     }
 
-    pub fn update_elders(&mut self) {
-        let mut by_age: Vec<_> = self.nodes.iter().filter(|&(_, n)| n.is_adult()).collect();
-        by_age.sort_by_key(|&(_, x)| -(x.age as i8));
+    fn nodes_by_age(&self) -> Vec<Node> {
+        let mut by_age: Vec<_> = self.nodes.iter().map(|(_, n)| *n).collect();
+        by_age.sort_by_key(|x| -(x.age as i8));
+        by_age
+    }
+
+    fn update_elders(&mut self) {
+        let by_age = self.nodes_by_age();
         self.elders = by_age
             .into_iter()
             .take(GROUP_SIZE)
-            .map(|(name, _)| *name)
+            .filter(|n| n.is_adult())
+            .map(|n| n.name())
             .collect();
     }
 
-    pub fn add(&mut self, node: Node) {
+    fn add(&mut self, node: Node) -> Vec<ChurnResult> {
         assert!(self.prefix.matches(node.name()));
         if node.is_adult() {
             self.adults.insert(node.name());
@@ -101,21 +148,40 @@ impl Section {
         }
         self.nodes.insert(node.name(), node);
         self.update_elders();
+        self.churn(ChurnEvent::PeerAdded(node))
     }
 
-    pub fn remove(&mut self, name: u64) -> Option<Node> {
+    fn remove_or_relocate<F: FnOnce(Node) -> ChurnResult>(
+        &mut self,
+        name: u64,
+        f: F,
+    ) -> Vec<ChurnResult> {
         let node = self.nodes.remove(&name);
         let _ = self.adults.remove(&name);
         let _ = self.infants.remove(&name);
         self.update_elders();
-        node
+        if let Some(node) = node {
+            let mut result = self.churn(ChurnEvent::PeerRemoved(node));
+            result.push(f(node));
+            result
+        } else {
+            vec![]
+        }
+    }
+
+    fn remove(&mut self, name: u64) -> Vec<ChurnResult> {
+        self.remove_or_relocate(name, ChurnResult::Dropped)
+    }
+
+    fn relocate(&mut self, name: u64) -> Vec<ChurnResult> {
+        self.remove_or_relocate(name, ChurnResult::Relocate)
     }
 
     pub fn prefix(&self) -> Prefix {
         self.prefix
     }
 
-    pub fn split(self) -> (Section, Section) {
+    fn split(self) -> (Section, Section, Vec<ChurnResult>) {
         let (prefix0, prefix1) = (self.prefix.extend(0), self.prefix.extend(1));
         let (mut section0, mut section1) = (Section::new(prefix0), Section::new(prefix1));
         for (name, node) in self.nodes {
@@ -127,16 +193,20 @@ impl Section {
                 panic!("Node {:?} found in section {:?}", node, self.prefix);
             }
         }
-        (section0, section1)
+        let mut churn = section0.churn(ChurnEvent::Split(self.prefix));
+        churn.extend(section1.churn(ChurnEvent::Split(self.prefix)));
+        (section0, section1, churn)
     }
 
-    pub fn merge(self, other: Section) -> Section {
+    fn merge(self, other: Section) -> (Section, Vec<ChurnResult>) {
         let merged_prefix = self.prefix.shorten();
         let mut result = Section::new(merged_prefix);
         for (_, node) in self.nodes.into_iter().chain(other.nodes.into_iter()) {
             result.add(node);
         }
-        result
+        let prefix = result.prefix();
+        let churn_result = result.churn(ChurnEvent::Merge(prefix));
+        (result, churn_result)
     }
 
     pub fn should_split(&self) -> bool {
@@ -149,6 +219,18 @@ impl Section {
 
     pub fn nodes(&self) -> BTreeSet<Node> {
         self.nodes.iter().map(|(_, n)| *n).collect()
+    }
+
+    fn churn(&mut self, event: ChurnEvent) -> Vec<ChurnResult> {
+        let event_hash = event.hash();
+        let trailing_zeros = trailing_zeros(event_hash);
+        let by_age = self.nodes_by_age();
+        let node_to_age = by_age.into_iter().find(|n| n.age >= trailing_zeros);
+        if let Some(node) = node_to_age {
+            self.relocate(node.name())
+        } else {
+            vec![]
+        }
     }
 }
 
@@ -181,9 +263,10 @@ impl Network {
         }
         if let Some(prefix) = should_split {
             let section = self.nodes.remove(&prefix).unwrap();
-            let (section0, section1) = section.split();
+            let (section0, section1, churn) = section.split();
             self.nodes.insert(section0.prefix(), section0);
             self.nodes.insert(section1.prefix(), section1);
+            self.handle_churn(churn);
         }
     }
 
@@ -198,6 +281,74 @@ impl Network {
             .flat_map(|(_, s)| s.nodes().into_iter())
             .map(|n| n.drop_probability())
             .sum()
+    }
+
+    fn merge_if_necessary(&mut self, node: Node) -> Vec<ChurnResult> {
+        let section_to_merge = self.nodes
+            .iter_mut()
+            .find(|&(ref pfx, ref mut section)| pfx.matches(node.name()))
+            .and_then(|(_, section)| if section.should_merge() {
+                Some(section.prefix())
+            } else {
+                None
+            });
+        if let Some(prefix) = section_to_merge {
+            self.merge(prefix)
+        } else {
+            vec![]
+        }
+    }
+
+    fn merge(&mut self, prefix: Prefix) -> Vec<ChurnResult> {
+        let merged_pfx = prefix.shorten();
+        let sections: Vec<_> = self.nodes
+            .keys()
+            .filter(|&pfx| merged_pfx.is_ancestor(pfx))
+            .cloned()
+            .collect();
+        let mut sections: Vec<_> = sections
+            .into_iter()
+            .filter_map(|pfx| self.nodes.remove(&pfx))
+            .collect();
+        let mut churn_results = vec![];
+        while sections.len() > 1 {
+            sections.sort_by_key(|s| s.prefix());
+            let section1 = sections.pop().unwrap();
+            let section2 = sections.pop().unwrap();
+            let (section, churn_result) = section1.merge(section2);
+            sections.push(section);
+            churn_results.extend(churn_result);
+        }
+        let section = sections.pop().unwrap();
+        self.nodes.insert(section.prefix(), section);
+        churn_results
+    }
+
+    fn relocate(&mut self, node: Node) -> Vec<ChurnResult> {
+        vec![]
+    }
+
+    fn handle_churn(&mut self, churn: Vec<ChurnResult>) {
+        let mut churn_result = churn;
+        loop {
+            let mut new_churn = vec![];
+            for result in churn_result {
+                match result {
+                    ChurnResult::Dropped(node) => {
+                        self.left_nodes.push(node);
+                        new_churn.extend(self.merge_if_necessary(node));
+                    }
+                    ChurnResult::Relocate(node) => {
+                        new_churn.extend(self.relocate(node));
+                        new_churn.extend(self.merge_if_necessary(node));
+                    }
+                }
+            }
+            churn_result = new_churn;
+            if churn_result.is_empty() {
+                break;
+            }
+        }
     }
 
     pub fn drop_random_node<R: Rng>(&mut self, rng: &mut R) {
@@ -217,43 +368,13 @@ impl Network {
             }
             res
         };
-        let node = node_and_prefix.and_then(|(prefix, name)| {
-            self.nodes.get_mut(&prefix).and_then(|section| {
-                section.remove(name).and_then(|node| {
-                    Some((
-                        node,
-                        if section.should_merge() {
-                            Some(prefix)
-                        } else {
-                            None
-                        },
-                    ))
-                })
-            })
+        node_and_prefix.map(|(prefix, name)| if let Some(results) =
+            self.nodes.get_mut(&prefix).map(
+                |section| section.remove(name),
+            )
+        {
+            self.handle_churn(results);
         });
-        if let Some((node, should_merge)) = node {
-            self.left_nodes.push(node);
-            if let Some(prefix) = should_merge {
-                let merged_pfx = prefix.shorten();
-                let sections: Vec<_> = self.nodes
-                    .keys()
-                    .filter(|&pfx| merged_pfx.is_ancestor(pfx))
-                    .cloned()
-                    .collect();
-                let mut sections: Vec<_> = sections
-                    .into_iter()
-                    .filter_map(|pfx| self.nodes.remove(&pfx))
-                    .collect();
-                while sections.len() > 1 {
-                    sections.sort_by_key(|s| s.prefix());
-                    let section1 = sections.pop().unwrap();
-                    let section2 = sections.pop().unwrap();
-                    sections.push(section1.merge(section2));
-                }
-                let section = sections.pop().unwrap();
-                self.nodes.insert(section.prefix(), section);
-            }
-        }
     }
 
     pub fn rejoin_random_node<R: Rng>(&mut self, rng: &mut R) {
