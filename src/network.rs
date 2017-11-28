@@ -250,7 +250,7 @@ impl Network {
         }
     }
 
-    fn add_node(&mut self, node: Node) {
+    fn add_node<R: Rng>(&mut self, rng: &mut R, node: Node) {
         let mut should_split = None;
         for (p, s) in &mut self.nodes {
             if p.matches(node.name()) {
@@ -266,13 +266,13 @@ impl Network {
             let (section0, section1, churn) = section.split();
             self.nodes.insert(section0.prefix(), section0);
             self.nodes.insert(section1.prefix(), section1);
-            self.handle_churn(churn);
+            self.handle_churn(rng, churn);
         }
     }
 
     pub fn add_random_node<R: Rng>(&mut self, rng: &mut R) {
         let node = Node::new(rng.gen());
-        self.add_node(node);
+        self.add_node(rng, node);
     }
 
     fn total_drop_weight(&self) -> f64 {
@@ -324,11 +324,26 @@ impl Network {
         churn_results
     }
 
-    fn relocate(&mut self, node: Node) -> Vec<ChurnResult> {
-        vec![]
+    fn relocate<R: Rng>(&mut self, rng: &mut R, node: Node) {
+        let new_node = {
+            let src_section = self.nodes
+                .keys()
+                .find(|&pfx| pfx.matches(node.name()))
+                .unwrap();
+            let neighbours: Vec<_> = self.nodes
+                .keys()
+                .filter(|&pfx| pfx.is_neighbour(src_section))
+                .collect();
+            let neighbour = rng.choose(&neighbours).unwrap();
+            Node {
+                name: neighbour.substituted_in(node.name()),
+                age: node.age + 1,
+            }
+        };
+        self.add_node(rng, new_node);
     }
 
-    fn handle_churn(&mut self, churn: Vec<ChurnResult>) {
+    fn handle_churn<R: Rng>(&mut self, rng: &mut R, churn: Vec<ChurnResult>) {
         let mut churn_result = churn;
         loop {
             let mut new_churn = vec![];
@@ -339,7 +354,7 @@ impl Network {
                         new_churn.extend(self.merge_if_necessary(node));
                     }
                     ChurnResult::Relocate(node) => {
-                        new_churn.extend(self.relocate(node));
+                        self.relocate(rng, node);
                         new_churn.extend(self.merge_if_necessary(node));
                     }
                 }
@@ -373,7 +388,7 @@ impl Network {
                 |section| section.remove(name),
             )
         {
-            self.handle_churn(results);
+            self.handle_churn(rng, results);
         });
     }
 
@@ -381,6 +396,6 @@ impl Network {
         let node_index = rng.gen_range(0, self.left_nodes.len());
         let mut node = self.left_nodes.remove(node_index);
         node.rejoined();
-        self.add_node(node);
+        self.add_node(rng, node);
     }
 }

@@ -37,6 +37,14 @@ impl Prefix {
         }
     }
 
+    pub fn with_flipped_bit(self, bit: u8) -> Prefix {
+        let mask = 1 << (63 - bit);
+        Prefix {
+            bits: self.bits ^ mask,
+            len: self.len,
+        }
+    }
+
     pub fn matches(&self, name: u64) -> bool {
         (name & self.len_mask()) ^ self.bits == 0
     }
@@ -51,6 +59,24 @@ impl Prefix {
 
     pub fn is_compatible_with(&self, other: &Prefix) -> bool {
         self.is_ancestor(other) || self.is_child(other)
+    }
+
+    pub fn is_neighbour(&self, other: &Prefix) -> bool {
+        let diff = self.bits ^ other.bits;
+        let bit = diff.leading_zeros() as u8;
+        if bit < self.len {
+            let diff = self.with_flipped_bit(bit).bits ^ other.bits;
+            diff.leading_zeros() as u8 >= self.len
+        } else {
+            false
+        }
+    }
+
+    pub fn substituted_in(&self, mut name: u64) -> u64 {
+        let mask = self.len_mask();
+        name &= !mask;
+        name |= self.bits;
+        name
     }
 
     pub fn from_str(s: &str) -> Option<Prefix> {
