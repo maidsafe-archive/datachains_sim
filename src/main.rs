@@ -11,11 +11,14 @@ mod network;
 use rand::{thread_rng, Rng};
 use network::Network;
 
+const P_ADD: u8 = 90;
+const P_DROP: u8 = 7;
+
 fn random_event<R: Rng>(network: &mut Network, rng: &mut R) {
     let x = rng.gen_range(0, 100);
-    if x >= 0 && x < 75 {
+    if x < P_ADD {
         network.add_random_node(rng);
-    } else if x >= 75 && x < 95 {
+    } else if x >= P_ADD && x < P_ADD + P_DROP {
         network.drop_random_node(rng);
     } else {
         network.rejoin_random_node(rng);
