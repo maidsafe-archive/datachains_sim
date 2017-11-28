@@ -7,6 +7,7 @@ use serde_json;
 use tiny_keccak::sha3_256;
 
 pub const GROUP_SIZE: usize = 8;
+pub const BUFFER: usize = 3;
 type Digest = [u8; 32];
 
 fn trailing_zeros(hash: Digest) -> u8 {
@@ -210,11 +211,11 @@ impl Section {
     }
 
     pub fn should_split(&self) -> bool {
-        false
+        self.adults.len() >= 2 * (GROUP_SIZE + BUFFER)
     }
 
     pub fn should_merge(&self) -> bool {
-        false
+        self.adults.len() <= GROUP_SIZE
     }
 
     pub fn nodes(&self) -> BTreeSet<Node> {
@@ -286,7 +287,7 @@ impl Network {
     fn merge_if_necessary(&mut self, node: Node) -> Vec<ChurnResult> {
         let section_to_merge = self.nodes
             .iter_mut()
-            .find(|&(ref pfx, ref mut section)| pfx.matches(node.name()))
+            .find(|&(ref pfx, _)| pfx.matches(node.name()))
             .and_then(|(_, section)| if section.should_merge() {
                 Some(section.prefix())
             } else {
