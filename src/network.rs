@@ -1,6 +1,6 @@
 use std::collections::{BTreeSet, BTreeMap};
 use std::fmt;
-use std::iter::Iterator;
+use std::iter::{Iterator, Sum};
 use prefix::Prefix;
 use rand::Rng;
 use serde_json;
@@ -129,6 +129,10 @@ impl Section {
         }
     }
 
+    pub fn len(&self) -> usize {
+        self.nodes.len()
+    }
+
     fn nodes_by_age(&self) -> Vec<Node> {
         let mut by_age: Vec<_> = self.nodes.iter().map(|(_, n)| *n).collect();
         by_age.sort_by_key(|x| -(x.age as i8));
@@ -188,31 +192,45 @@ impl Section {
     }
 
     fn split(self) -> (Section, Section, Vec<ChurnResult>) {
+        let mut churn = vec![];
         let (prefix0, prefix1) = (self.prefix.extend(0), self.prefix.extend(1));
+        println!(
+            "Splitting {:?} into {:?} and {:?}",
+            self.prefix,
+            prefix0,
+            prefix1
+        );
         let (mut section0, mut section1) = (Section::new(prefix0), Section::new(prefix1));
         for (name, node) in self.nodes {
             if prefix0.matches(name) {
-                section0.add(node);
+                churn.extend(section0.add(node));
             } else if prefix1.matches(name) {
-                section1.add(node);
+                churn.extend(section1.add(node));
             } else {
                 panic!("Node {:?} found in section {:?}", node, self.prefix);
             }
         }
-        let mut churn = section0.churn(ChurnEvent::Split(self.prefix));
+        churn.extend(section0.churn(ChurnEvent::Split(self.prefix)));
         churn.extend(section1.churn(ChurnEvent::Split(self.prefix)));
         (section0, section1, churn)
     }
 
     fn merge(self, other: Section) -> (Section, Vec<ChurnResult>) {
+        assert!(
+            self.prefix.is_sibling(&other.prefix),
+            "Attempt to merge {:?} with {:?}",
+            self.prefix,
+            other.prefix
+        );
         let merged_prefix = self.prefix.shorten();
         let mut result = Section::new(merged_prefix);
+        let mut churn = vec![];
         for (_, node) in self.nodes.into_iter().chain(other.nodes.into_iter()) {
-            result.add(node);
+            churn.extend(result.add(node));
         }
         let prefix = result.prefix();
-        let churn_result = result.churn(ChurnEvent::Merge(prefix));
-        (result, churn_result)
+        churn.extend(result.churn(ChurnEvent::Merge(prefix)));
+        (result, churn)
     }
 
     pub fn should_split(&self) -> bool {
@@ -261,6 +279,9 @@ impl fmt::Debug for Section {
 
 #[derive(Clone)]
 pub struct Network {
+    adds: u64,
+    drops: u64,
+    rejoins: u64,
     nodes: BTreeMap<Prefix, Section>,
     left_nodes: Vec<Node>,
 }
@@ -270,6 +291,9 @@ impl Network {
         let mut nodes = BTreeMap::new();
         nodes.insert(Prefix::empty(), Section::new(Prefix::empty()));
         Network {
+            adds: 0,
+            drops: 0,
+            rejoins: 0,
             nodes,
             left_nodes: Vec::new(),
         }
@@ -280,7 +304,6 @@ impl Network {
         let mut churn = vec![];
         for (p, s) in &mut self.nodes {
             if p.matches(node.name()) {
-                println!("Adding node {:?} to section {:?}", node, p);
                 churn.extend(s.add(node));
                 if s.should_split() {
                     should_split = Some(*p);
@@ -299,7 +322,9 @@ impl Network {
     }
 
     pub fn add_random_node<R: Rng>(&mut self, rng: &mut R) {
+        self.adds += 1;
         let node = Node::new(rng.gen());
+        println!("Adding node {:?}", node);
         self.add_node(rng, node);
     }
 
@@ -329,6 +354,7 @@ impl Network {
 
     fn merge(&mut self, prefix: Prefix) -> Vec<ChurnResult> {
         let merged_pfx = prefix.shorten();
+        println!("Merging into {:?}", merged_pfx);
         let sections: Vec<_> = self.nodes
             .keys()
             .filter(|&pfx| merged_pfx.is_ancestor(pfx))
@@ -358,16 +384,19 @@ impl Network {
                 .keys()
                 .find(|&pfx| pfx.matches(node.name()))
                 .unwrap();
-            let neighbours: Vec<_> = self.nodes
+            let mut neighbours: Vec<_> = self.nodes
                 .keys()
                 .filter(|&pfx| pfx.is_neighbour(src_section))
                 .collect();
-            let neighbour = if let Some(n) = rng.choose(&neighbours) {
+            neighbours.sort_by_key(|pfx| (pfx.len(), self.nodes.get(pfx).unwrap().len()));
+            let neighbour = if let Some(n) = neighbours.first() {
                 n
             } else {
                 src_section
             };
+            let old_node = node.clone();
             node.relocate(rng, neighbour);
+            println!("Relocating {:?} to {:?} as {:?}", old_node, neighbour, node);
         }
         self.add_node(rng, node);
     }
@@ -396,6 +425,7 @@ impl Network {
     }
 
     pub fn drop_random_node<R: Rng>(&mut self, rng: &mut R) {
+        self.drops += 1;
         let total_weight = self.total_drop_weight();
         let mut drop = rng.gen::<f64>() * total_weight;
         let node_and_prefix = {
@@ -417,13 +447,16 @@ impl Network {
                 |section| section.remove(name),
             )
         {
+            println!("Dropping node {:?} from section {:?}", name, prefix);
             self.handle_churn(rng, results);
         });
     }
 
     pub fn rejoin_random_node<R: Rng>(&mut self, rng: &mut R) {
+        self.rejoins += 1;
         rng.shuffle(&mut self.left_nodes);
         if let Some(mut node) = self.left_nodes.pop() {
+            println!("Rejoining node {:?}", node);
             node.rejoined();
             self.add_node(rng, node);
         }
@@ -434,7 +467,11 @@ impl fmt::Debug for Network {
     fn fmt(&self, fmt: &mut fmt::Formatter) -> fmt::Result {
         write!(
             fmt,
-            "Network {{\n\n{:?}\nleft_nodes: {:?}\n\n}}",
+            "Network {{\n\tadds: {}\n\tdrops: {}\n\trejoins: {}\n\ttotal nodes: {}\n\n{:?}\nleft_nodes: {:?}\n\n}}",
+            self.adds,
+            self.drops,
+            self.rejoins,
+            usize::sum(self.nodes.values().map(|s| s.len())),
             self.nodes.values(),
             self.left_nodes
         )

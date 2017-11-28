@@ -2,8 +2,8 @@ use std::fmt;
 
 #[derive(Clone, Copy, PartialOrd, Ord, PartialEq, Eq, Serialize, Deserialize)]
 pub struct Prefix {
-    bits: u64,
     len: u8,
+    bits: u64,
 }
 
 impl Prefix {
@@ -67,6 +67,14 @@ impl Prefix {
 
     pub fn is_compatible_with(&self, other: &Prefix) -> bool {
         self.is_ancestor(other) || self.is_child(other)
+    }
+
+    pub fn is_sibling(&self, other: &Prefix) -> bool {
+        if self.len > 0 {
+            (*self).with_flipped_bit(self.len - 1) == *other
+        } else {
+            false
+        }
     }
 
     pub fn is_neighbour(&self, other: &Prefix) -> bool {
