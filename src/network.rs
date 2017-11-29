@@ -149,7 +149,7 @@ impl Section {
             .collect();
     }
 
-    fn add(&mut self, node: Node) -> Vec<ChurnResult> {
+    fn add(&mut self, node: Node, ignore: bool) -> Vec<ChurnResult> {
         if node.age() == 1 && self.nodes.values().any(|n| n.age() == 1) && self.elders.len() == 8 &&
             self.elders.iter().filter_map(|x| self.nodes.get(x)).all(
                 |n| {
@@ -169,7 +169,11 @@ impl Section {
         }
         self.nodes.insert(node.name(), node);
         self.update_elders();
-        self.churn(ChurnEvent::PeerAdded(node))
+        if ignore {
+            vec![]
+        } else {
+            self.churn(ChurnEvent::PeerAdded(node))
+        }
     }
 
     fn remove_or_relocate<F: FnOnce(Node) -> ChurnResult>(
@@ -214,9 +218,9 @@ impl Section {
         let (mut section0, mut section1) = (Section::new(prefix0), Section::new(prefix1));
         for (name, node) in self.nodes {
             if prefix0.matches(name) {
-                churn.extend(section0.add(node));
+                churn.extend(section0.add(node, true));
             } else if prefix1.matches(name) {
-                churn.extend(section1.add(node));
+                churn.extend(section1.add(node, true));
             } else {
                 panic!("Node {:?} found in section {:?}", node, self.prefix);
             }
@@ -237,7 +241,7 @@ impl Section {
         let mut result = Section::new(merged_prefix);
         let mut churn = vec![];
         for (_, node) in self.nodes.into_iter().chain(other.nodes.into_iter()) {
-            churn.extend(result.add(node));
+            churn.extend(result.add(node, true));
         }
         let prefix = result.prefix();
         churn.extend(result.churn(ChurnEvent::Merge(prefix)));
@@ -310,12 +314,12 @@ impl Network {
         }
     }
 
-    fn add_node(&mut self, node: Node) -> Vec<ChurnResult> {
+    fn add_node(&mut self, node: Node, relocation: bool) -> Vec<ChurnResult> {
         let mut should_split = None;
         let mut churn = vec![];
         for (p, s) in &mut self.nodes {
             if p.matches(node.name()) {
-                churn.extend(s.add(node));
+                churn.extend(s.add(node, relocation));
                 if s.should_split() {
                     should_split = Some(*p);
                 }
@@ -336,7 +340,7 @@ impl Network {
         self.adds += 1;
         let node = Node::new(rng.gen());
         println!("Adding node {:?}", node);
-        let churn = self.add_node(node);
+        let churn = self.add_node(node, false);
         self.handle_churn(rng, churn);
     }
 
@@ -418,7 +422,7 @@ impl Network {
                 node
             );
         }
-        self.add_node(node)
+        self.add_node(node, true)
     }
 
     fn handle_churn<R: Rng>(&mut self, rng: &mut R, churn: Vec<ChurnResult>) {
@@ -491,7 +495,7 @@ impl Network {
         if let Some(mut node) = self.left_nodes.pop() {
             println!("Rejoining node {:?}", node);
             node.rejoined();
-            let churn = self.add_node(node);
+            let churn = self.add_node(node, false);
             self.handle_churn(rng, churn);
         }
     }
