@@ -348,17 +348,19 @@ impl Network {
             .sum()
     }
 
-    fn merge_if_necessary(&mut self, node: Node) -> Vec<ChurnResult> {
-        let section_to_merge = self.nodes
-            .iter_mut()
-            .find(|&(ref pfx, _)| pfx.matches(node.name()))
-            .and_then(|(_, section)| if section.should_merge() {
-                Some(section.prefix())
-            } else {
-                None
-            });
-        if let Some(prefix) = section_to_merge {
-            self.merge(prefix)
+    fn prefix_for_node(&self, node: Node) -> Option<Prefix> {
+        self.nodes
+            .keys()
+            .find(|pfx| pfx.matches(node.name()))
+            .cloned()
+    }
+
+    fn merge_if_necessary(&mut self, pfx: Prefix) -> Vec<ChurnResult> {
+        if self.nodes.get(&pfx).map(|s| s.should_merge()).unwrap_or(
+            false,
+        )
+        {
+            self.merge(pfx)
         } else {
             vec![]
         }
@@ -427,17 +429,30 @@ impl Network {
                 match result {
                     ChurnResult::Dropped(node) => {
                         self.left_nodes.push(node);
-                        new_churn.extend(self.merge_if_necessary(node));
+                        let churn = self.prefix_for_node(node)
+                            .map(|pfx| self.merge_if_necessary(pfx))
+                            .unwrap_or(vec![]);
+                        new_churn.extend(churn);
                     }
                     ChurnResult::Relocate(node) => {
                         new_churn.extend(self.relocate(rng, node));
-                        new_churn.extend(self.merge_if_necessary(node));
+                        let churn = self.prefix_for_node(node)
+                            .map(|pfx| self.merge_if_necessary(pfx))
+                            .unwrap_or(vec![]);
+                        new_churn.extend(churn);
                     }
                 }
             }
             churn_result = new_churn;
             if churn_result.is_empty() {
-                break;
+                // final check for merges
+                let prefixes: Vec<_> = self.nodes.keys().cloned().collect();
+                for pfx in prefixes {
+                    churn_result.extend(self.merge_if_necessary(pfx));
+                }
+                if churn_result.is_empty() {
+                    break;
+                }
             }
         }
     }
