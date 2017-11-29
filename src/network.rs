@@ -150,6 +150,17 @@ impl Section {
     }
 
     fn add(&mut self, node: Node) -> Vec<ChurnResult> {
+        if node.age() == 1 && self.nodes.values().any(|n| n.age() == 1) && self.elders.len() == 8 &&
+            self.elders.iter().filter_map(|x| self.nodes.get(x)).all(
+                |n| {
+                    n.is_adult()
+                },
+            )
+        {
+            // disallow more than one node aged 1 per section if the section is complete
+            // (all elders are adults)
+            return vec![];
+        }
         assert!(self.prefix.matches(node.name()));
         if node.is_adult() {
             self.adults.insert(node.name());
@@ -238,7 +249,7 @@ impl Section {
     }
 
     pub fn should_merge(&self) -> bool {
-        self.adults.len() <= GROUP_SIZE
+        self.prefix.len() > 0 && self.adults.len() <= GROUP_SIZE
     }
 
     pub fn nodes(&self) -> BTreeSet<Node> {
@@ -299,7 +310,7 @@ impl Network {
         }
     }
 
-    fn add_node<R: Rng>(&mut self, rng: &mut R, node: Node) {
+    fn add_node(&mut self, node: Node) -> Vec<ChurnResult> {
         let mut should_split = None;
         let mut churn = vec![];
         for (p, s) in &mut self.nodes {
@@ -318,14 +329,15 @@ impl Network {
             self.nodes.insert(section1.prefix(), section1);
             churn.extend(split_churn);
         }
-        self.handle_churn(rng, churn);
+        churn
     }
 
     pub fn add_random_node<R: Rng>(&mut self, rng: &mut R) {
         self.adds += 1;
         let node = Node::new(rng.gen());
         println!("Adding node {:?}", node);
-        self.add_node(rng, node);
+        let churn = self.add_node(node);
+        self.handle_churn(rng, churn);
     }
 
     fn total_drop_weight(&self) -> f64 {
@@ -378,7 +390,7 @@ impl Network {
         churn_results
     }
 
-    fn relocate<R: Rng>(&mut self, rng: &mut R, mut node: Node) {
+    fn relocate<R: Rng>(&mut self, rng: &mut R, mut node: Node) -> Vec<ChurnResult> {
         {
             let src_section = self.nodes
                 .keys()
@@ -396,9 +408,15 @@ impl Network {
             };
             let old_node = node.clone();
             node.relocate(rng, neighbour);
-            println!("Relocating {:?} to {:?} as {:?}", old_node, neighbour, node);
+            println!(
+                "Relocating {:?} from {:?} to {:?} as {:?}",
+                old_node,
+                src_section,
+                neighbour,
+                node
+            );
         }
-        self.add_node(rng, node);
+        self.add_node(node)
     }
 
     fn handle_churn<R: Rng>(&mut self, rng: &mut R, churn: Vec<ChurnResult>) {
@@ -412,7 +430,7 @@ impl Network {
                         new_churn.extend(self.merge_if_necessary(node));
                     }
                     ChurnResult::Relocate(node) => {
-                        self.relocate(rng, node);
+                        new_churn.extend(self.relocate(rng, node));
                         new_churn.extend(self.merge_if_necessary(node));
                     }
                 }
@@ -458,7 +476,8 @@ impl Network {
         if let Some(mut node) = self.left_nodes.pop() {
             println!("Rejoining node {:?}", node);
             node.rejoined();
-            self.add_node(rng, node);
+            let churn = self.add_node(node);
+            self.handle_churn(rng, churn);
         }
     }
 }
