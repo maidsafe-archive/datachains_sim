@@ -80,9 +80,10 @@ impl Prefix {
     pub fn is_neighbour(&self, other: &Prefix) -> bool {
         let diff = self.bits ^ other.bits;
         let bit = diff.leading_zeros() as u8;
-        if bit < self.len {
+        if bit < self.len && bit < other.len {
             let diff = self.with_flipped_bit(bit).bits ^ other.bits;
-            diff.leading_zeros() as u8 >= self.len
+            let bit = diff.leading_zeros() as u8;
+            bit >= self.len || bit >= other.len
         } else {
             false
         }
