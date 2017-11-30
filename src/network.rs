@@ -291,7 +291,7 @@ impl fmt::Debug for Section {
             self.elders.len(),
             self.adults.len() - self.elders.len(),
             self.infants.len(),
-            self.nodes.values().collect::<Vec<_>>()
+            self.nodes_by_age(),
         )
     }
 }
