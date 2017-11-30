@@ -249,7 +249,11 @@ impl Section {
     }
 
     pub fn should_split(&self) -> bool {
-        self.adults.len() >= 2 * (GROUP_SIZE + BUFFER)
+        let prefix0 = self.prefix.extend(0);
+        let prefix1 = self.prefix.extend(1);
+        let adults0 = self.adults.iter().filter(|&n| prefix0.matches(*n)).count();
+        let adults1 = self.adults.iter().filter(|&n| prefix1.matches(*n)).count();
+        adults0 >= GROUP_SIZE + BUFFER && adults1 >= GROUP_SIZE + BUFFER
     }
 
     pub fn should_merge(&self) -> bool {
