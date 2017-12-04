@@ -1,0 +1,236 @@
+use std::collections::BTreeMap;
+use std::fmt;
+use std::iter::{Iterator, Sum};
+use rand::Rng;
+use network::prefix::Prefix;
+use network::node::Node;
+use network::section::Section;
+use network::churn::ChurnResult;
+
+#[derive(Clone)]
+pub struct Network {
+    adds: u64,
+    drops: u64,
+    rejoins: u64,
+    nodes: BTreeMap<Prefix, Section>,
+    left_nodes: Vec<Node>,
+}
+
+impl Network {
+    pub fn new() -> Network {
+        let mut nodes = BTreeMap::new();
+        nodes.insert(Prefix::empty(), Section::new(Prefix::empty()));
+        Network {
+            adds: 0,
+            drops: 0,
+            rejoins: 0,
+            nodes,
+            left_nodes: Vec::new(),
+        }
+    }
+
+    fn add_node(&mut self, node: Node, relocation: bool) -> Vec<ChurnResult> {
+        let mut should_split = None;
+        let mut churn = vec![];
+        for (p, s) in &mut self.nodes {
+            if p.matches(node.name()) {
+                churn.extend(s.add(node, relocation));
+                if s.should_split() {
+                    should_split = Some(*p);
+                }
+                break;
+            }
+        }
+        if let Some(prefix) = should_split {
+            let section = self.nodes.remove(&prefix).unwrap();
+            let (section0, section1, split_churn) = section.split();
+            self.nodes.insert(section0.prefix(), section0);
+            self.nodes.insert(section1.prefix(), section1);
+            churn.extend(split_churn);
+        }
+        churn
+    }
+
+    pub fn add_random_node<R: Rng>(&mut self, rng: &mut R) {
+        self.adds += 1;
+        let node = Node::new(rng.gen());
+        println!("Adding node {:?}", node);
+        let churn = self.add_node(node, false);
+        self.handle_churn(rng, churn);
+    }
+
+    fn total_drop_weight(&self) -> f64 {
+        self.nodes
+            .iter()
+            .flat_map(|(_, s)| s.nodes().into_iter())
+            .map(|n| n.drop_probability())
+            .sum()
+    }
+
+    fn prefix_for_node(&self, node: Node) -> Option<Prefix> {
+        self.nodes
+            .keys()
+            .find(|pfx| pfx.matches(node.name()))
+            .cloned()
+    }
+
+    fn merge_if_necessary(&mut self, pfx: Prefix) -> Vec<ChurnResult> {
+        if self.nodes.get(&pfx).map(|s| s.should_merge()).unwrap_or(
+            false,
+        )
+        {
+            self.merge(pfx)
+        } else {
+            vec![]
+        }
+    }
+
+    fn merge(&mut self, prefix: Prefix) -> Vec<ChurnResult> {
+        let merged_pfx = prefix.shorten();
+        println!("Merging into {:?}", merged_pfx);
+        let sections: Vec<_> = self.nodes
+            .keys()
+            .filter(|&pfx| merged_pfx.is_ancestor(pfx))
+            .cloned()
+            .collect();
+        let mut sections: Vec<_> = sections
+            .into_iter()
+            .filter_map(|pfx| self.nodes.remove(&pfx))
+            .collect();
+        let mut churn_results = vec![];
+        while sections.len() > 1 {
+            sections.sort_by_key(|s| s.prefix());
+            let section1 = sections.pop().unwrap();
+            let section2 = sections.pop().unwrap();
+            let (section, churn_result) = section1.merge(section2);
+            sections.push(section);
+            churn_results.extend(churn_result);
+        }
+        let section = sections.pop().unwrap();
+        self.nodes.insert(section.prefix(), section);
+        churn_results
+    }
+
+    fn relocate<R: Rng>(&mut self, rng: &mut R, mut node: Node) -> Vec<ChurnResult> {
+        {
+            let src_section = self.nodes
+                .keys()
+                .find(|&pfx| pfx.matches(node.name()))
+                .unwrap();
+            let mut neighbours: Vec<_> = self.nodes
+                .keys()
+                .filter(|&pfx| pfx.is_neighbour(src_section))
+                .collect();
+            //if node.is_adult() {
+            neighbours.sort_by_key(|pfx| (pfx.len(), self.nodes.get(pfx).unwrap().len()));
+            //} else {
+            //    rng.shuffle(&mut neighbours);
+            //}
+            let neighbour = if let Some(n) = neighbours.first() {
+                n
+            } else {
+                src_section
+            };
+            let old_node = node.clone();
+            node.relocate(rng, neighbour);
+            println!(
+                "Relocating {:?} from {:?} to {:?} as {:?}",
+                old_node,
+                src_section,
+                neighbour,
+                node
+            );
+        }
+        self.add_node(node, false)
+    }
+
+    fn handle_churn<R: Rng>(&mut self, rng: &mut R, churn: Vec<ChurnResult>) {
+        let mut churn_result = churn;
+        loop {
+            let mut new_churn = vec![];
+            for result in churn_result {
+                match result {
+                    ChurnResult::Dropped(node) => {
+                        self.left_nodes.push(node);
+                        let churn = self.prefix_for_node(node)
+                            .map(|pfx| self.merge_if_necessary(pfx))
+                            .unwrap_or(vec![]);
+                        new_churn.extend(churn);
+                    }
+                    ChurnResult::Relocate(node) => {
+                        new_churn.extend(self.relocate(rng, node));
+                        let churn = self.prefix_for_node(node)
+                            .map(|pfx| self.merge_if_necessary(pfx))
+                            .unwrap_or(vec![]);
+                        new_churn.extend(churn);
+                    }
+                }
+            }
+            churn_result = new_churn;
+            if churn_result.is_empty() {
+                // final check for merges
+                let prefixes: Vec<_> = self.nodes.keys().cloned().collect();
+                for pfx in prefixes {
+                    churn_result.extend(self.merge_if_necessary(pfx));
+                }
+                if churn_result.is_empty() {
+                    break;
+                }
+            }
+        }
+    }
+
+    pub fn drop_random_node<R: Rng>(&mut self, rng: &mut R) {
+        self.drops += 1;
+        let total_weight = self.total_drop_weight();
+        let mut drop = rng.gen::<f64>() * total_weight;
+        let node_and_prefix = {
+            let mut res = None;
+            let nodes_iter = self.nodes.iter().flat_map(|(p, s)| {
+                s.nodes().into_iter().map(move |n| (*p, n))
+            });
+            for (p, n) in nodes_iter {
+                if n.drop_probability() > drop {
+                    res = Some((p, n.name()));
+                    break;
+                }
+                drop -= n.drop_probability();
+            }
+            res
+        };
+        node_and_prefix.map(|(prefix, name)| if let Some(results) =
+            self.nodes.get_mut(&prefix).map(
+                |section| section.remove(name),
+            )
+        {
+            println!("Dropping node {:?} from section {:?}", name, prefix);
+            self.handle_churn(rng, results);
+        });
+    }
+
+    pub fn rejoin_random_node<R: Rng>(&mut self, rng: &mut R) {
+        self.rejoins += 1;
+        rng.shuffle(&mut self.left_nodes);
+        if let Some(mut node) = self.left_nodes.pop() {
+            println!("Rejoining node {:?}", node);
+            node.rejoined();
+            let churn = self.add_node(node, false);
+            self.handle_churn(rng, churn);
+        }
+    }
+}
+
+impl fmt::Debug for Network {
+    fn fmt(&self, fmt: &mut fmt::Formatter) -> fmt::Result {
+        write!(
+            fmt,
+            "Network {{\n\tadds: {}\n\tdrops: {}\n\trejoins: {}\n\ttotal nodes: {}\n\n{:?}\nleft_nodes: {:?}\n\n}}",
+            self.adds,
+            self.drops,
+            self.rejoins,
+            usize::sum(self.nodes.values().map(|s| s.len())),
+            self.nodes.values(),
+            self.left_nodes
+        )
+    }
+}

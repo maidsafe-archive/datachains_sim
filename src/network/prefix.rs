@@ -1,6 +1,20 @@
 use std::fmt;
 
 #[derive(Clone, Copy, PartialOrd, Ord, PartialEq, Eq, Serialize, Deserialize)]
+pub struct Name(pub u64);
+
+impl fmt::Debug for Name {
+    fn fmt(&self, fmt: &mut fmt::Formatter) -> fmt::Result {
+        let (b0, b1, b2) = (
+            (self.0 >> 56) as u8,
+            (self.0 >> 48) as u8,
+            (self.0 >> 40) as u8,
+        );
+        write!(fmt, "{:02x}{:02x}{:02x}...", b0, b1, b2)
+    }
+}
+
+#[derive(Clone, Copy, PartialOrd, Ord, PartialEq, Eq, Serialize, Deserialize)]
 pub struct Prefix {
     len: u8,
     bits: u64,
@@ -53,12 +67,12 @@ impl Prefix {
         }
     }
 
-    pub fn matches(&self, name: u64) -> bool {
-        (name & self.len_mask()) ^ self.bits == 0
+    pub fn matches(&self, name: Name) -> bool {
+        (name.0 & self.len_mask()) ^ self.bits == 0
     }
 
     pub fn is_ancestor(&self, other: &Prefix) -> bool {
-        self.len <= other.len && self.matches(other.bits)
+        self.len <= other.len && self.matches(Name(other.bits))
     }
 
     pub fn is_child(&self, other: &Prefix) -> bool {
@@ -89,10 +103,10 @@ impl Prefix {
         }
     }
 
-    pub fn substituted_in(&self, mut name: u64) -> u64 {
+    pub fn substituted_in(&self, mut name: Name) -> Name {
         let mask = self.len_mask();
-        name &= !mask;
-        name |= self.bits;
+        name.0 &= !mask;
+        name.0 |= self.bits;
         name
     }
 
