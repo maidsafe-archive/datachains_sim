@@ -131,6 +131,7 @@ impl Section {
         if node.age() == 1 && self.nodes.values().any(|n| n.age() == 1) && self.is_complete() {
             // disallow more than one node aged 1 per section if the section is complete
             // (all elders are adults)
+            println!("Node {:?} refused in section {:?}", node, self.prefix);
             return EventResult::Ignored;
         }
         let verifying_prefix = if self.merging {
