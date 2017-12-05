@@ -52,14 +52,35 @@ impl Network {
             NetworkEvent::Live(_) |
             NetworkEvent::Gone(_) |
             NetworkEvent::Lost(_) => {
-                let section = self.nodes.get_mut(&prefix).unwrap();
-                let queue = self.event_queue.entry(prefix).or_insert_with(Vec::new);
-                queue.extend(section.handle_event(event));
+                if let Some(section) = self.nodes.get_mut(&prefix) {
+                    let queue = self.event_queue.entry(prefix).or_insert_with(Vec::new);
+                    queue.extend(section.handle_event(event));
+                }
             }
             NetworkEvent::Relocated(n) => {
                 self.relocate(rng, n);
             }
-            NetworkEvent::PrefixChange(_) => {}
+            NetworkEvent::PrefixChange(pfx) => {
+                if pfx.len() < prefix.len() {
+                    // merging
+                } else {
+                    // splitting
+                    if let Some(section) = self.nodes.remove(&prefix) {
+                        let _ = self.event_queue.remove(&prefix);
+                        let (sd0, sd1) = section.split();
+                        self.event_queue
+                            .entry(sd0.0.prefix())
+                            .or_insert_with(Vec::new)
+                            .extend(sd0.1);
+                        self.event_queue
+                            .entry(sd1.0.prefix())
+                            .or_insert_with(Vec::new)
+                            .extend(sd1.1);
+                        self.nodes.insert(sd0.0.prefix(), sd0.0);
+                        self.nodes.insert(sd1.0.prefix(), sd1.0);
+                    }
+                }
+            }
         }
     }
 

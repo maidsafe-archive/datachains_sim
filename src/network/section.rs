@@ -86,6 +86,7 @@ impl Section {
             events.push(NetworkEvent::PrefixChange(self.prefix.shorten()));
         }
         if self.should_split() {
+            self.splitting = true;
             events.push(NetworkEvent::PrefixChange(self.prefix));
         }
         let result = match event {
@@ -100,11 +101,10 @@ impl Section {
                 EventResult::Handled
             }
         };
-        if result == EventResult::Ignored {
-            vec![]
-        } else {
-            self.check_ageing(event)
+        if result != EventResult::Ignored {
+            events.extend(self.check_ageing(event));
         }
+        events
     }
 
     fn check_ageing(&mut self, event: NetworkEvent) -> Vec<NetworkEvent> {
@@ -163,7 +163,8 @@ impl Section {
     }
 
 
-    pub fn split(self) -> (SplitData, SplitData) {
+    pub fn split(mut self) -> (SplitData, SplitData) {
+        self.splitting = false;
         let mut churn0 = vec![];
         let mut churn1 = vec![];
         let (prefix0, prefix1) = (self.prefix.extend(0), self.prefix.extend(1));
