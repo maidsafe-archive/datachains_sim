@@ -30,6 +30,7 @@ fn main() {
     for i in 0..100000 {
         println!("Iteration {}...", i);
         random_event(&mut network, &mut rng);
+        network.process_events(&mut rng);
     }
     println!("Network state:\n{:?}", network);
 }

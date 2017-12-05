@@ -1,11 +1,12 @@
 use std::collections::BTreeMap;
 use std::fmt;
+use std::mem;
 use std::iter::{Iterator, Sum};
 use rand::Rng;
 use network::prefix::Prefix;
 use network::node::Node;
 use network::section::Section;
-use network::churn::ChurnResult;
+use network::churn::NetworkEvent;
 
 #[derive(Clone)]
 pub struct Network {
@@ -14,6 +15,7 @@ pub struct Network {
     rejoins: u64,
     nodes: BTreeMap<Prefix, Section>,
     left_nodes: Vec<Node>,
+    event_queue: BTreeMap<Prefix, Vec<NetworkEvent>>,
 }
 
 impl Network {
@@ -26,37 +28,50 @@ impl Network {
             rejoins: 0,
             nodes,
             left_nodes: Vec::new(),
+            event_queue: BTreeMap::new(),
         }
     }
 
-    fn add_node(&mut self, node: Node, relocation: bool) -> Vec<ChurnResult> {
-        let mut should_split = None;
-        let mut churn = vec![];
-        for (p, s) in &mut self.nodes {
-            if p.matches(node.name()) {
-                churn.extend(s.add(node, relocation));
-                if s.should_split() {
-                    should_split = Some(*p);
+    fn has_events(&self) -> bool {
+        self.event_queue.values().any(|x| !x.is_empty())
+    }
+
+    pub fn process_events<R: Rng>(&mut self, rng: &mut R) {
+        while self.has_events() {
+            let queue = mem::replace(&mut self.event_queue, BTreeMap::new());
+            for (prefix, events) in queue {
+                for event in events {
+                    self.process_single_event(rng, prefix, event);
                 }
-                break;
             }
         }
-        if let Some(prefix) = should_split {
-            let section = self.nodes.remove(&prefix).unwrap();
-            let (section0, section1, split_churn) = section.split();
-            self.nodes.insert(section0.prefix(), section0);
-            self.nodes.insert(section1.prefix(), section1);
-            churn.extend(split_churn);
+    }
+
+    fn process_single_event<R: Rng>(&mut self, rng: &mut R, prefix: Prefix, event: NetworkEvent) {
+        match event {
+            NetworkEvent::Live(_) |
+            NetworkEvent::Gone(_) |
+            NetworkEvent::Lost(_) => {
+                let section = self.nodes.get_mut(&prefix).unwrap();
+                let queue = self.event_queue.entry(prefix).or_insert_with(Vec::new);
+                queue.extend(section.handle_event(event));
+            }
+            NetworkEvent::Relocated(n) => {
+                self.relocate(rng, n);
+            }
+            NetworkEvent::PrefixChange(_) => {}
         }
-        churn
     }
 
     pub fn add_random_node<R: Rng>(&mut self, rng: &mut R) {
         self.adds += 1;
         let node = Node::new(rng.gen());
         println!("Adding node {:?}", node);
-        let churn = self.add_node(node, false);
-        self.handle_churn(rng, churn);
+        let prefix = self.prefix_for_node(node).unwrap();
+        self.event_queue
+            .entry(prefix)
+            .or_insert_with(Vec::new)
+            .push(NetworkEvent::Live(node));
     }
 
     fn total_drop_weight(&self) -> f64 {
@@ -74,45 +89,8 @@ impl Network {
             .cloned()
     }
 
-    fn merge_if_necessary(&mut self, pfx: Prefix) -> Vec<ChurnResult> {
-        if self.nodes.get(&pfx).map(|s| s.should_merge()).unwrap_or(
-            false,
-        )
-        {
-            self.merge(pfx)
-        } else {
-            vec![]
-        }
-    }
-
-    fn merge(&mut self, prefix: Prefix) -> Vec<ChurnResult> {
-        let merged_pfx = prefix.shorten();
-        println!("Merging into {:?}", merged_pfx);
-        let sections: Vec<_> = self.nodes
-            .keys()
-            .filter(|&pfx| merged_pfx.is_ancestor(pfx))
-            .cloned()
-            .collect();
-        let mut sections: Vec<_> = sections
-            .into_iter()
-            .filter_map(|pfx| self.nodes.remove(&pfx))
-            .collect();
-        let mut churn_results = vec![];
-        while sections.len() > 1 {
-            sections.sort_by_key(|s| s.prefix());
-            let section1 = sections.pop().unwrap();
-            let section2 = sections.pop().unwrap();
-            let (section, churn_result) = section1.merge(section2);
-            sections.push(section);
-            churn_results.extend(churn_result);
-        }
-        let section = sections.pop().unwrap();
-        self.nodes.insert(section.prefix(), section);
-        churn_results
-    }
-
-    fn relocate<R: Rng>(&mut self, rng: &mut R, mut node: Node) -> Vec<ChurnResult> {
-        {
+    fn relocate<R: Rng>(&mut self, rng: &mut R, mut node: Node) {
+        let (node, neighbour) = {
             let src_section = self.nodes
                 .keys()
                 .find(|&pfx| pfx.matches(node.name()))
@@ -140,44 +118,12 @@ impl Network {
                 neighbour,
                 node
             );
-        }
-        self.add_node(node, false)
-    }
-
-    fn handle_churn<R: Rng>(&mut self, rng: &mut R, churn: Vec<ChurnResult>) {
-        let mut churn_result = churn;
-        loop {
-            let mut new_churn = vec![];
-            for result in churn_result {
-                match result {
-                    ChurnResult::Dropped(node) => {
-                        self.left_nodes.push(node);
-                        let churn = self.prefix_for_node(node)
-                            .map(|pfx| self.merge_if_necessary(pfx))
-                            .unwrap_or(vec![]);
-                        new_churn.extend(churn);
-                    }
-                    ChurnResult::Relocate(node) => {
-                        new_churn.extend(self.relocate(rng, node));
-                        let churn = self.prefix_for_node(node)
-                            .map(|pfx| self.merge_if_necessary(pfx))
-                            .unwrap_or(vec![]);
-                        new_churn.extend(churn);
-                    }
-                }
-            }
-            churn_result = new_churn;
-            if churn_result.is_empty() {
-                // final check for merges
-                let prefixes: Vec<_> = self.nodes.keys().cloned().collect();
-                for pfx in prefixes {
-                    churn_result.extend(self.merge_if_necessary(pfx));
-                }
-                if churn_result.is_empty() {
-                    break;
-                }
-            }
-        }
+            (node, neighbour)
+        };
+        self.event_queue
+            .entry(*neighbour)
+            .or_insert_with(Vec::new)
+            .push(NetworkEvent::Live(node));
     }
 
     pub fn drop_random_node<R: Rng>(&mut self, rng: &mut R) {
@@ -198,13 +144,12 @@ impl Network {
             }
             res
         };
-        node_and_prefix.map(|(prefix, name)| if let Some(results) =
-            self.nodes.get_mut(&prefix).map(
-                |section| section.remove(name),
-            )
-        {
+        node_and_prefix.map(|(prefix, name)| {
             println!("Dropping node {:?} from section {:?}", name, prefix);
-            self.handle_churn(rng, results);
+            self.event_queue
+                .entry(prefix)
+                .or_insert_with(Vec::new)
+                .push(NetworkEvent::Lost(name));
         });
     }
 
@@ -214,8 +159,11 @@ impl Network {
         if let Some(mut node) = self.left_nodes.pop() {
             println!("Rejoining node {:?}", node);
             node.rejoined();
-            let churn = self.add_node(node, false);
-            self.handle_churn(rng, churn);
+            let prefix = self.prefix_for_node(node).unwrap();
+            self.event_queue
+                .entry(prefix)
+                .or_insert_with(Vec::new)
+                .push(NetworkEvent::Live(node));
         }
     }
 }
