@@ -123,6 +123,26 @@ impl Section {
         events
     }
 
+    fn choose_for_relocation(&self, age: u8) -> Option<Node> {
+        let by_age: Vec<_> = self.nodes_by_age()
+            .into_iter()
+            .filter(|n| n.age() <= age)
+            .collect();
+        let candidates = by_age.first().cloned().map(|n| {
+            by_age
+                .into_iter()
+                .filter(|m| m.age() == n.age())
+                .collect::<Vec<_>>()
+        });
+        candidates.and_then(|mut cand| if cand.len() <= 1 {
+            cand.first().cloned()
+        } else {
+            let total_xor = cand.iter().fold(0, |total, node| total ^ node.name().0);
+            cand.sort_by_key(|node| node.name().0 ^ total_xor);
+            cand.first().cloned()
+        })
+    }
+
     fn check_ageing(&mut self, event: NetworkEvent) -> Vec<SectionEvent> {
         if let Some(node) = event.get_node() {
             if !node.is_adult() && self.prefix.len() > 4 {
@@ -134,8 +154,7 @@ impl Section {
         }
         let event_hash = event.hash();
         let trailing_zeros = trailing_zeros(event_hash);
-        let by_age = self.nodes_by_age();
-        let node_to_age = by_age.into_iter().find(|n| n.age() <= trailing_zeros);
+        let node_to_age = self.choose_for_relocation(trailing_zeros);
         if let Some(node) = node_to_age {
             vec![SectionEvent::NeedRelocate(node)]
         } else {
