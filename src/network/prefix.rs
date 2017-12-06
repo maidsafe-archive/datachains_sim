@@ -1,5 +1,6 @@
 use std::fmt;
 
+/// A helper struct that only has the purpose of pretty-printing debug information
 #[derive(Clone, Copy, PartialOrd, Ord, PartialEq, Eq, Serialize, Deserialize)]
 pub struct Name(pub u64);
 
@@ -14,6 +15,8 @@ impl fmt::Debug for Name {
     }
 }
 
+/// A structure representing a network prefix - a simplified version of the Prefix struct from
+/// `routing`
 #[derive(Clone, Copy, PartialOrd, Ord, PartialEq, Eq, Serialize, Deserialize)]
 pub struct Prefix {
     len: u8,

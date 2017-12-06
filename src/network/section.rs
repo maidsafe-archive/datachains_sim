@@ -5,6 +5,10 @@ use network::prefix::{Prefix, Name};
 use network::node::{Node, Digest};
 use network::churn::{NetworkEvent, SectionEvent};
 
+/// An enum for return values of some methods.
+/// The methods can say that the event was ignored, in which case its processing ends as if nothing
+/// ever happened. If the event was handled, it could generate some additional response to the
+/// network.
 #[derive(Clone, Copy, PartialEq, Eq)]
 enum EventResult {
     Handled,
@@ -12,6 +16,7 @@ enum EventResult {
     Ignored,
 }
 
+/// Returns the number of trailing zeros in a hash
 fn trailing_zeros(hash: Digest) -> u8 {
     let mut result = 0;
     let mut byte_index = 31;
@@ -26,21 +31,36 @@ fn trailing_zeros(hash: Digest) -> u8 {
     result as u8
 }
 
+/// A section after a split together with events it needs to process afterwards.
 pub type SplitData = (Section, Vec<NetworkEvent>);
 
+/// The structure representing a section.
+/// It has a prefix and some nodes. The nodes are sorted into categories: Elders, Adults and
+/// Infants, according to their age an function in the section.
 #[derive(Clone)]
 pub struct Section {
+    /// the section's prefix
     prefix: Prefix,
+    /// the prefix used to verify whether a node belongs to the section; should only differ from
+    /// `prefix` during merges
     verifying_prefix: Prefix,
+    /// the nodes belonging to the section
     nodes: BTreeMap<Name, Node>,
+    /// the names of the Elders
     elders: BTreeSet<Name>,
+    /// the names of the Adults (including the Elders)
     adults: BTreeSet<Name>,
+    /// the names of the Infants (including the Elders, if some of them are Infants during the
+    /// network startup phase)
     infants: BTreeSet<Name>,
+    /// are we currently merging?
     merging: bool,
+    /// are we currently splitting?
     splitting: bool,
 }
 
 impl Section {
+    /// Creates a new, empty section
     pub fn new(prefix: Prefix) -> Section {
         Section {
             prefix,
@@ -54,16 +74,20 @@ impl Section {
         }
     }
 
+    /// Returns the number of nodes in the section
     pub fn len(&self) -> usize {
         self.nodes.len()
     }
 
+    /// Returns the list of nodes in the section sorted by age.
     fn nodes_by_age(&self) -> Vec<Node> {
         let mut by_age: Vec<_> = self.nodes.iter().map(|(_, n)| *n).collect();
-        by_age.sort_by_key(|x| (-(x.age() as i8), x.hash()[0]));
+        by_age.sort_by_key(|x| -(x.age() as i8));
         by_age
     }
 
+    /// Returns whether the section has a complete group.
+    /// A complete group is GROUP_SIZE nodes that are Adults (have age > 4)
     fn is_complete(&self) -> bool {
         self.elders.len() == 8 &&
             self.elders.iter().filter_map(|x| self.nodes.get(x)).all(
@@ -73,6 +97,7 @@ impl Section {
             )
     }
 
+    /// Updates the names of the Elders in the section
     fn update_elders(&mut self) {
         let by_age = self.nodes_by_age();
         self.elders = by_age
@@ -83,6 +108,8 @@ impl Section {
             .collect();
     }
 
+    /// Processes a network event passed to the section and responds with appropriate section
+    /// events
     pub fn handle_event(&mut self, event: NetworkEvent) -> Vec<SectionEvent> {
         let mut events = vec![];
         if self.should_merge() {
@@ -123,6 +150,7 @@ impl Section {
         events
     }
 
+    /// Return the node that should be relocated, with age no greater than `age`
     fn choose_for_relocation(&self, age: u8) -> Option<Node> {
         let by_age: Vec<_> = self.nodes_by_age()
             .into_iter()
@@ -143,6 +171,8 @@ impl Section {
         })
     }
 
+    /// Checks the hash of the NetworkEvent and returns any SectionEvents triggered by it due to
+    /// node ageing - in particular, relocations
     fn check_ageing(&mut self, event: NetworkEvent) -> Vec<SectionEvent> {
         if let Some(node) = event.get_node() {
             if !node.is_adult() && self.prefix.len() > 4 {
@@ -162,6 +192,7 @@ impl Section {
         }
     }
 
+    /// Adds a node to the section and returns whether the event was handled
     fn add(&mut self, node: Node) -> EventResult {
         if node.age() == 1 && self.nodes.values().any(|n| n.age() == 1) && self.is_complete() {
             // disallow more than one node aged 1 per section if the section is complete
@@ -186,6 +217,7 @@ impl Section {
         EventResult::Handled
     }
 
+    /// Removes a node from the section and returns whether the event was handled
     fn remove(&mut self, name: Name) -> EventResult {
         let node = self.nodes.remove(&name);
         let _ = self.adults.remove(&name);
@@ -198,6 +230,8 @@ impl Section {
         }
     }
 
+    /// Relocates a node from the section - that is, removes it, but doesn't generate a `Dropped`
+    /// section event, which would cause the network to think that the node has actually left
     fn relocate(&mut self, name: Name) -> EventResult {
         let node = self.nodes.remove(&name);
         let _ = self.adults.remove(&name);
@@ -210,11 +244,13 @@ impl Section {
         }
     }
 
+    /// Returns the section's prefix
     pub fn prefix(&self) -> Prefix {
         self.prefix
     }
 
 
+    /// Splits the section into two and generates the corresponding churn events
     pub fn split(mut self) -> (SplitData, SplitData) {
         self.splitting = false;
         let mut churn0 = vec![];
@@ -245,6 +281,9 @@ impl Section {
         ((section0, churn0), (section1, churn1))
     }
 
+    /// Merges two sections into one
+    /// The churn events for a merge are generated by the network, not the section, as the section
+    /// has no knowledge of other sections it is merging with
     pub fn merge(self, other: Section) -> Section {
         assert!(
             self.prefix.is_sibling(&other.prefix),
@@ -263,6 +302,7 @@ impl Section {
         result
     }
 
+    /// Returns whether the section should split. If we are already splitting, returns false
     pub fn should_split(&self) -> bool {
         let prefix0 = self.prefix.extend(0);
         let prefix1 = self.prefix.extend(1);
@@ -271,14 +311,17 @@ impl Section {
         !self.splitting && adults0 >= GROUP_SIZE + BUFFER && adults1 >= GROUP_SIZE + BUFFER
     }
 
+    /// Returns whether the section should merge. If we are already merging, returns false
     pub fn should_merge(&self) -> bool {
         !self.merging && self.prefix.len() > 0 && self.adults.len() <= GROUP_SIZE
     }
 
+    /// Returns a set of all the nodes in the section
     pub fn nodes(&self) -> BTreeSet<Node> {
         self.nodes.iter().map(|(_, n)| *n).collect()
     }
 
+    /// Returns the section's Elders as `Node`s
     pub fn elders(&self) -> BTreeSet<Node> {
         self.elders
             .iter()

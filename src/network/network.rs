@@ -8,43 +8,65 @@ use network::node::Node;
 use network::section::Section;
 use network::churn::{NetworkEvent, SectionEvent};
 
+/// A wrapper struct that handles merges in progress
+/// When two sections merge, they need to handle a bunch
+/// of churn events before they actually become a single
+/// section. This remembers which sections are in the
+/// process of merging and reports whether all of them are
+/// ready to be combined.
 #[derive(Clone, PartialEq, Eq, PartialOrd, Ord)]
 struct PendingMerge {
     complete: BTreeMap<Prefix, bool>,
 }
 
 impl PendingMerge {
+    /// Creates a new "pending merge" from a set of prefixes - the prefixes passed
+    /// are the ones that are supposed to merge
     fn from_prefixes<I: IntoIterator<Item = Prefix>>(pfxs: I) -> Self {
         PendingMerge { complete: pfxs.into_iter().map(|pfx| (pfx, false)).collect() }
     }
 
+    /// Mark a prefix as having completed the merge
     fn completed(&mut self, pfx: Prefix) {
         if let Some(entry) = self.complete.get_mut(&pfx) {
             *entry = true;
         }
     }
 
+    /// Returns whether the sections are ready to be combined into one
     fn is_done(&self) -> bool {
         self.complete.iter().all(|(_, &complete)| complete)
     }
 
+    /// Throws out the wrapper layer and returns the pure map
     fn into_map(self) -> BTreeMap<Prefix, bool> {
         self.complete
     }
 }
 
+/// The structure representing the whole network
+/// It's a container for sections that simulates all the
+/// churn and communication between them.
 #[derive(Clone)]
 pub struct Network {
+    /// the number of "add" random events
     adds: u64,
+    /// the number of "drop" random events
     drops: u64,
+    /// the number of "rejoin" random events
     rejoins: u64,
+    /// all the sections in the network indexed by prefixes
     nodes: BTreeMap<Prefix, Section>,
+    /// the nodes that left the network and could rejoin in the future
     left_nodes: Vec<Node>,
+    /// queues of events to be processed by each section
     event_queue: BTreeMap<Prefix, Vec<NetworkEvent>>,
+    /// prefixes that are in the process of merging
     pending_merges: BTreeMap<Prefix, PendingMerge>,
 }
 
 impl Network {
+    /// Starts a new network
     pub fn new() -> Network {
         let mut nodes = BTreeMap::new();
         nodes.insert(Prefix::empty(), Section::new(Prefix::empty()));
@@ -59,10 +81,14 @@ impl Network {
         }
     }
 
+    /// Checks whether there are any events in the queues
     fn has_events(&self) -> bool {
         self.event_queue.values().any(|x| !x.is_empty())
     }
 
+    /// Sends all events to the corresponding sections and processes the events passed
+    /// back. The responses generate new events and the cycle continues until the queues are empty.
+    /// Then. if any pending merges are ready, they are processed, too.
     pub fn process_events<R: Rng>(&mut self, rng: &mut R) {
         while self.has_events() {
             let queue = mem::replace(&mut self.event_queue, BTreeMap::new());
@@ -98,6 +124,8 @@ impl Network {
         }
     }
 
+    /// Processes a single response from a section and potentially inserts some events into its
+    /// queue
     fn process_single_event<R: Rng>(&mut self, rng: &mut R, prefix: Prefix, event: SectionEvent) {
         match event {
             SectionEvent::NodeDropped(node) => {
@@ -126,6 +154,9 @@ impl Network {
         }
     }
 
+    /// Returns the section that would be the result of merging sections with the given prefixes.
+    /// If `destructive` is true, the sections are actually removed from `self.nodes` to be
+    /// combined.
     fn merged_section<'a, I: IntoIterator<Item = &'a Prefix> + Clone>(
         &mut self,
         prefixes: I,
@@ -153,6 +184,8 @@ impl Network {
         sections.pop().unwrap()
     }
 
+    /// Calculates which sections will merge into a given prefix, creates a pending merge for them
+    /// and prepares queues for churn events to be processed before the merge itself.
     fn merge(&mut self, prefix: Prefix) {
         let merged_pfx = prefix.shorten();
         if self.pending_merges.contains_key(&merged_pfx) {
@@ -178,6 +211,8 @@ impl Network {
         }
     }
 
+    /// Creates the queue of events to be processed by a section `pfx` when it merges into
+    /// `merged`.
     fn calculate_merge_events(&self, merged: &Section, pfx: Prefix) -> Vec<NetworkEvent> {
         let old_elders = self.nodes.get(&pfx).unwrap().elders();
         let new_elders = merged.elders();
@@ -192,6 +227,7 @@ impl Network {
         events
     }
 
+    /// Adds a random node to the network by pushing an appropriate event to the queue
     pub fn add_random_node<R: Rng>(&mut self, rng: &mut R) {
         self.adds += 1;
         let node = Node::new(rng.gen());
@@ -203,6 +239,9 @@ impl Network {
             .push(NetworkEvent::Live(node));
     }
 
+    /// Calculates the sum of weights for the dropping probability.
+    /// When choosing the node to be dropped, every node is assigned a weight, so that older nodes
+    /// have less chance of dropping. This helps in calculating which node should be dropped.
     fn total_drop_weight(&self) -> f64 {
         self.nodes
             .iter()
@@ -211,6 +250,7 @@ impl Network {
             .sum()
     }
 
+    /// Returns the prefix a node should belong to.
     fn prefix_for_node(&self, node: Node) -> Option<Prefix> {
         self.nodes
             .keys()
@@ -218,6 +258,8 @@ impl Network {
             .cloned()
     }
 
+    /// Chooses a new section for the given node, generates a new name for it,
+    /// increases its age,  and sends a `Live` event to the section.
     fn relocate<R: Rng>(&mut self, rng: &mut R, mut node: Node) {
         let (node, neighbour) = {
             let src_section = self.nodes
@@ -228,11 +270,8 @@ impl Network {
                 .keys()
                 .filter(|&pfx| pfx.is_neighbour(src_section))
                 .collect();
-            //if node.is_adult() {
+            // prioritise sections with shorter prefixes and having less nodes to balance the network
             neighbours.sort_by_key(|pfx| (pfx.len(), self.nodes.get(pfx).unwrap().len()));
-            //} else {
-            //    rng.shuffle(&mut neighbours);
-            //}
             let neighbour = if let Some(n) = neighbours.first() {
                 n
             } else {
@@ -255,6 +294,8 @@ impl Network {
             .push(NetworkEvent::Live(node));
     }
 
+    /// Drops a random node from the network by sending a `Lost` event to the section.
+    /// The probability of a given node dropping is weighted based on its age.
     pub fn drop_random_node<R: Rng>(&mut self, rng: &mut R) {
         self.drops += 1;
         let total_weight = self.total_drop_weight();
@@ -282,6 +323,8 @@ impl Network {
         });
     }
 
+    /// Chooses a random node from among the ones that left the network and gets it to rejoin.
+    /// The age of the rejoining node is reduced.
     pub fn rejoin_random_node<R: Rng>(&mut self, rng: &mut R) {
         self.rejoins += 1;
         rng.shuffle(&mut self.left_nodes);

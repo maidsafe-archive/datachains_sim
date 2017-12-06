@@ -45,10 +45,10 @@ impl NetworkEvent {
     }
 }
 
-/// Events that can happen in the network.
-/// The sections handle them and generate new ones
-/// in the process. Some events can also be generated from
-/// the outside.
+/// Events reported by the sections to the network.
+/// The network processes them and responds with churn
+/// events that the nodes would add to their data chains
+/// in the real network.
 #[derive(Clone, Copy, Serialize, Deserialize, PartialEq, Eq)]
 pub enum SectionEvent {
     NodeDropped(Node),
