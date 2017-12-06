@@ -6,7 +6,32 @@ use rand::Rng;
 use network::prefix::Prefix;
 use network::node::Node;
 use network::section::Section;
-use network::churn::NetworkEvent;
+use network::churn::{NetworkEvent, SectionEvent};
+
+#[derive(Clone, PartialEq, Eq, PartialOrd, Ord)]
+struct PendingMerge {
+    complete: BTreeMap<Prefix, bool>,
+}
+
+impl PendingMerge {
+    fn from_prefixes<I: IntoIterator<Item = Prefix>>(pfxs: I) -> Self {
+        PendingMerge { complete: pfxs.into_iter().map(|pfx| (pfx, false)).collect() }
+    }
+
+    fn completed(&mut self, pfx: Prefix) {
+        if let Some(entry) = self.complete.get_mut(&pfx) {
+            *entry = true;
+        }
+    }
+
+    fn is_done(&self) -> bool {
+        self.complete.iter().all(|(_, &complete)| complete)
+    }
+
+    fn into_map(self) -> BTreeMap<Prefix, bool> {
+        self.complete
+    }
+}
 
 #[derive(Clone)]
 pub struct Network {
@@ -16,6 +41,7 @@ pub struct Network {
     nodes: BTreeMap<Prefix, Section>,
     left_nodes: Vec<Node>,
     event_queue: BTreeMap<Prefix, Vec<NetworkEvent>>,
+    pending_merges: BTreeMap<Prefix, PendingMerge>,
 }
 
 impl Network {
@@ -29,6 +55,7 @@ impl Network {
             nodes,
             left_nodes: Vec::new(),
             event_queue: BTreeMap::new(),
+            pending_merges: BTreeMap::new(),
         }
     }
 
@@ -40,48 +67,129 @@ impl Network {
         while self.has_events() {
             let queue = mem::replace(&mut self.event_queue, BTreeMap::new());
             for (prefix, events) in queue {
+                let mut section_events = vec![];
                 for event in events {
-                    self.process_single_event(rng, prefix, event);
+                    let result = self.nodes
+                        .get_mut(&prefix)
+                        .map(|section| section.handle_event(event))
+                        .unwrap_or_else(Vec::new);
+                    section_events.extend(result);
+                    if let NetworkEvent::PrefixChange(pfx) = event {
+                        if let Some(pending_merge) = self.pending_merges.get_mut(&pfx) {
+                            pending_merge.completed(prefix);
+                        }
+                    }
+                }
+                for section_event in section_events {
+                    self.process_single_event(rng, prefix, section_event);
+                }
+            }
+        }
+        let merges_to_finalise: Vec<_> = self.pending_merges
+            .iter()
+            .filter(|&(_, pm)| pm.is_done())
+            .map(|(pfx, _)| *pfx)
+            .collect();
+        for pfx in merges_to_finalise {
+            println!("Finalising a merge into {:?}", pfx);
+            let pending_merge = self.pending_merges.remove(&pfx).unwrap().into_map();
+            let merged_section = self.merged_section(pending_merge.keys(), true);
+            self.nodes.insert(merged_section.prefix(), merged_section);
+        }
+    }
+
+    fn process_single_event<R: Rng>(&mut self, rng: &mut R, prefix: Prefix, event: SectionEvent) {
+        match event {
+            SectionEvent::NodeDropped(node) => {
+                self.left_nodes.push(node);
+            }
+            SectionEvent::NeedRelocate(node) => self.relocate(rng, node),
+            SectionEvent::RequestMerge => {
+                self.merge(prefix);
+            }
+            SectionEvent::RequestSplit => {
+                if let Some(section) = self.nodes.remove(&prefix) {
+                    let ((sec0, ev0), (sec1, ev1)) = section.split();
+                    let _ = self.event_queue.remove(&prefix);
+                    self.event_queue
+                        .entry(sec0.prefix())
+                        .or_insert_with(Vec::new)
+                        .extend(ev0);
+                    self.event_queue
+                        .entry(sec1.prefix())
+                        .or_insert_with(Vec::new)
+                        .extend(ev1);
+                    self.nodes.insert(sec0.prefix(), sec0);
+                    self.nodes.insert(sec1.prefix(), sec1);
                 }
             }
         }
     }
 
-    fn process_single_event<R: Rng>(&mut self, rng: &mut R, prefix: Prefix, event: NetworkEvent) {
-        match event {
-            NetworkEvent::Live(_) |
-            NetworkEvent::Gone(_) |
-            NetworkEvent::Lost(_) => {
-                if let Some(section) = self.nodes.get_mut(&prefix) {
-                    let queue = self.event_queue.entry(prefix).or_insert_with(Vec::new);
-                    queue.extend(section.handle_event(event));
-                }
-            }
-            NetworkEvent::Relocated(n) => {
-                self.relocate(rng, n);
-            }
-            NetworkEvent::PrefixChange(pfx) => {
-                if pfx.len() < prefix.len() {
-                    // merging
-                } else {
-                    // splitting
-                    if let Some(section) = self.nodes.remove(&prefix) {
-                        let _ = self.event_queue.remove(&prefix);
-                        let (sd0, sd1) = section.split();
-                        self.event_queue
-                            .entry(sd0.0.prefix())
-                            .or_insert_with(Vec::new)
-                            .extend(sd0.1);
-                        self.event_queue
-                            .entry(sd1.0.prefix())
-                            .or_insert_with(Vec::new)
-                            .extend(sd1.1);
-                        self.nodes.insert(sd0.0.prefix(), sd0.0);
-                        self.nodes.insert(sd1.0.prefix(), sd1.0);
-                    }
-                }
-            }
+    fn merged_section<'a, I: IntoIterator<Item = &'a Prefix> + Clone>(
+        &mut self,
+        prefixes: I,
+        destructive: bool,
+    ) -> Section {
+        let mut sections: Vec<_> = prefixes
+            .clone()
+            .into_iter()
+            .filter_map(|pfx| if destructive {
+                let _ = self.event_queue.remove(pfx);
+                self.nodes.remove(pfx)
+            } else {
+                self.nodes.get(pfx).cloned()
+            })
+            .collect();
+
+        while sections.len() > 1 {
+            sections.sort_by_key(|s| s.prefix());
+            let section1 = sections.pop().unwrap();
+            let section2 = sections.pop().unwrap();
+            let section = section1.merge(section2);
+            sections.push(section);
         }
+
+        sections.pop().unwrap()
+    }
+
+    fn merge(&mut self, prefix: Prefix) {
+        let merged_pfx = prefix.shorten();
+        if self.pending_merges.contains_key(&merged_pfx) {
+            return;
+        }
+        println!("Initiating a merge into {:?}", merged_pfx);
+        let prefixes: Vec<_> = self.nodes
+            .keys()
+            .filter(|&pfx| merged_pfx.is_ancestor(pfx))
+            .cloned()
+            .collect();
+
+        let pending_merge = PendingMerge::from_prefixes(prefixes.iter().cloned());
+        self.pending_merges.insert(merged_pfx, pending_merge);
+
+        let merged_section = self.merged_section(prefixes.iter(), false);
+        for pfx in prefixes {
+            let events = self.calculate_merge_events(&merged_section, pfx);
+            self.event_queue
+                .entry(pfx)
+                .or_insert_with(Vec::new)
+                .extend(events);
+        }
+    }
+
+    fn calculate_merge_events(&self, merged: &Section, pfx: Prefix) -> Vec<NetworkEvent> {
+        let old_elders = self.nodes.get(&pfx).unwrap().elders();
+        let new_elders = merged.elders();
+        let mut events = vec![NetworkEvent::StartMerge(merged.prefix())];
+        for lost_elder in &old_elders - &new_elders {
+            events.push(NetworkEvent::Gone(lost_elder));
+        }
+        for gained_elder in &new_elders - &old_elders {
+            events.push(NetworkEvent::Live(gained_elder));
+        }
+        events.push(NetworkEvent::PrefixChange(merged.prefix()));
+        events
     }
 
     pub fn add_random_node<R: Rng>(&mut self, rng: &mut R) {

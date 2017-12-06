@@ -14,6 +14,7 @@ pub enum NetworkEvent {
     Gone(Node),
     Relocated(Node),
     PrefixChange(Prefix),
+    StartMerge(Prefix),
 }
 
 impl NetworkEvent {
@@ -38,7 +39,20 @@ impl NetworkEvent {
     /// churn in ageing peers in the section. Currently true for all events.
     pub fn should_count(&self) -> bool {
         match *self {
+            NetworkEvent::StartMerge(_) => false,
             _ => true,
         }
     }
+}
+
+/// Events that can happen in the network.
+/// The sections handle them and generate new ones
+/// in the process. Some events can also be generated from
+/// the outside.
+#[derive(Clone, Copy, Serialize, Deserialize, PartialEq, Eq)]
+pub enum SectionEvent {
+    NodeDropped(Node),
+    NeedRelocate(Node),
+    RequestMerge,
+    RequestSplit,
 }

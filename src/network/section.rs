@@ -3,11 +3,12 @@ use std::fmt;
 use network::{BUFFER, GROUP_SIZE};
 use network::prefix::{Prefix, Name};
 use network::node::{Node, Digest};
-use network::churn::NetworkEvent;
+use network::churn::{NetworkEvent, SectionEvent};
 
 #[derive(Clone, Copy, PartialEq, Eq)]
 enum EventResult {
     Handled,
+    HandledWithEvent(SectionEvent),
     Ignored,
 }
 
@@ -30,6 +31,7 @@ pub type SplitData = (Section, Vec<NetworkEvent>);
 #[derive(Clone)]
 pub struct Section {
     prefix: Prefix,
+    verifying_prefix: Prefix,
     nodes: BTreeMap<Name, Node>,
     elders: BTreeSet<Name>,
     adults: BTreeSet<Name>,
@@ -42,6 +44,7 @@ impl Section {
     pub fn new(prefix: Prefix) -> Section {
         Section {
             prefix,
+            verifying_prefix: prefix,
             nodes: BTreeMap::new(),
             elders: BTreeSet::new(),
             adults: BTreeSet::new(),
@@ -80,34 +83,47 @@ impl Section {
             .collect();
     }
 
-    pub fn handle_event(&mut self, event: NetworkEvent) -> Vec<NetworkEvent> {
+    pub fn handle_event(&mut self, event: NetworkEvent) -> Vec<SectionEvent> {
         let mut events = vec![];
         if self.should_merge() {
-            events.push(NetworkEvent::PrefixChange(self.prefix.shorten()));
+            self.merging = true;
+            events.push(SectionEvent::RequestMerge);
         }
         if self.should_split() {
             self.splitting = true;
-            events.push(NetworkEvent::PrefixChange(self.prefix));
+            events.push(SectionEvent::RequestSplit);
         }
-        let result = match event {
+        let other_event = match event {
             NetworkEvent::Live(node) => self.add(node),
             NetworkEvent::Relocated(node) |
-            NetworkEvent::Gone(node) => self.remove(node.name()),
+            NetworkEvent::Gone(node) => self.relocate(node.name()),
             NetworkEvent::Lost(name) => self.remove(name),
-            NetworkEvent::PrefixChange(prefix) => {
+            NetworkEvent::PrefixChange(_) => {
                 self.splitting = false;
                 self.merging = false;
-                self.prefix = prefix;
+                EventResult::Handled
+            }
+            NetworkEvent::StartMerge(prefix) => {
+                // in order to accept new nodes, we must know that we are merging
+                self.verifying_prefix = prefix;
+                self.merging = true;
                 EventResult::Handled
             }
         };
-        if result != EventResult::Ignored {
-            events.extend(self.check_ageing(event));
+        match other_event {
+            EventResult::Handled => {
+                events.extend(self.check_ageing(event));
+            }
+            EventResult::HandledWithEvent(ev) => {
+                events.extend(self.check_ageing(event));
+                events.push(ev);
+            }
+            EventResult::Ignored => (),
         }
         events
     }
 
-    fn check_ageing(&mut self, event: NetworkEvent) -> Vec<NetworkEvent> {
+    fn check_ageing(&mut self, event: NetworkEvent) -> Vec<SectionEvent> {
         if let Some(node) = event.get_node() {
             if !node.is_adult() && self.prefix.len() > 4 {
                 return vec![];
@@ -121,7 +137,7 @@ impl Section {
         let by_age = self.nodes_by_age();
         let node_to_age = by_age.into_iter().find(|n| n.age() <= trailing_zeros);
         if let Some(node) = node_to_age {
-            vec![NetworkEvent::Relocated(node)]
+            vec![SectionEvent::NeedRelocate(node)]
         } else {
             vec![]
         }
@@ -134,12 +150,13 @@ impl Section {
             println!("Node {:?} refused in section {:?}", node, self.prefix);
             return EventResult::Ignored;
         }
-        let verifying_prefix = if self.merging {
-            self.prefix.shorten()
-        } else {
-            self.prefix
-        };
-        assert!(verifying_prefix.matches(node.name()));
+        assert!(
+            self.verifying_prefix.matches(node.name()),
+            "Section {:?}: {:?} does not match {:?}!",
+            self.prefix,
+            node.name(),
+            self.verifying_prefix
+        );
         if node.is_adult() {
             self.adults.insert(node.name());
         } else {
@@ -151,11 +168,27 @@ impl Section {
     }
 
     fn remove(&mut self, name: Name) -> EventResult {
-        let _ = self.nodes.remove(&name);
+        let node = self.nodes.remove(&name);
         let _ = self.adults.remove(&name);
         let _ = self.infants.remove(&name);
         self.update_elders();
-        EventResult::Handled
+        if let Some(node) = node {
+            EventResult::HandledWithEvent(SectionEvent::NodeDropped(node))
+        } else {
+            EventResult::Ignored
+        }
+    }
+
+    fn relocate(&mut self, name: Name) -> EventResult {
+        let node = self.nodes.remove(&name);
+        let _ = self.adults.remove(&name);
+        let _ = self.infants.remove(&name);
+        self.update_elders();
+        if node.is_some() {
+            EventResult::Handled
+        } else {
+            EventResult::Ignored
+        }
     }
 
     pub fn prefix(&self) -> Prefix {
@@ -202,6 +235,9 @@ impl Section {
         );
         let merged_prefix = self.prefix.shorten();
         let mut result = Section::new(merged_prefix);
+        // for multi-level merges - the next level must remember to verify against
+        // the fully-merged prefix
+        result.verifying_prefix = self.verifying_prefix;
         for (_, node) in self.nodes.into_iter().chain(other.nodes.into_iter()) {
             result.add(node);
         }
@@ -222,6 +258,14 @@ impl Section {
 
     pub fn nodes(&self) -> BTreeSet<Node> {
         self.nodes.iter().map(|(_, n)| *n).collect()
+    }
+
+    pub fn elders(&self) -> BTreeSet<Node> {
+        self.elders
+            .iter()
+            .filter_map(|name| self.nodes.get(name))
+            .cloned()
+            .collect()
     }
 }
 
