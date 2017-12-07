@@ -55,6 +55,10 @@ pub struct Network {
     drops: u64,
     /// the number of "rejoin" random events
     rejoins: u64,
+    /// the number of relocations
+    relocations: u64,
+    /// the total number of churn events
+    churn: u64,
     /// all the sections in the network indexed by prefixes
     nodes: BTreeMap<Prefix, Section>,
     /// the nodes that left the network and could rejoin in the future
@@ -74,6 +78,8 @@ impl Network {
             adds: 0,
             drops: 0,
             rejoins: 0,
+            relocations: 0,
+            churn: 0,
             nodes,
             left_nodes: Vec::new(),
             event_queue: BTreeMap::new(),
@@ -118,6 +124,7 @@ impl Network {
             .collect();
         for pfx in merges_to_finalise {
             println!("Finalising a merge into {:?}", pfx);
+            self.churn += 1; // counting merge as a single churn event
             let pending_merge = self.pending_merges.remove(&pfx).unwrap().into_map();
             let merged_section = self.merged_section(pending_merge.keys(), true);
             self.nodes.insert(merged_section.prefix(), merged_section);
@@ -131,7 +138,9 @@ impl Network {
             SectionEvent::NodeDropped(node) => {
                 self.left_nodes.push(node);
             }
-            SectionEvent::NeedRelocate(node) => self.relocate(rng, node),
+            SectionEvent::NeedRelocate(node) => {
+                self.relocate(rng, node);
+            }
             SectionEvent::RequestMerge => {
                 self.merge(prefix);
             }
@@ -149,6 +158,7 @@ impl Network {
                         .extend(ev1);
                     self.nodes.insert(sec0.prefix(), sec0);
                     self.nodes.insert(sec1.prefix(), sec1);
+                    self.churn += 1; // counting the split as one churn event
                 }
             }
         }
@@ -230,6 +240,7 @@ impl Network {
     /// Adds a random node to the network by pushing an appropriate event to the queue
     pub fn add_random_node<R: Rng>(&mut self, rng: &mut R) {
         self.adds += 1;
+        self.churn += 1;
         let node = Node::new(rng.gen());
         println!("Adding node {:?}", node);
         let prefix = self.prefix_for_node(node).unwrap();
@@ -261,6 +272,8 @@ impl Network {
     /// Chooses a new section for the given node, generates a new name for it,
     /// increases its age,  and sends a `Live` event to the section.
     fn relocate<R: Rng>(&mut self, rng: &mut R, mut node: Node) {
+        self.relocations += 1;
+        self.churn += 2; // leaving one section and joining another one
         let (node, neighbour) = {
             let src_section = self.nodes
                 .keys()
@@ -298,6 +311,7 @@ impl Network {
     /// The probability of a given node dropping is weighted based on its age.
     pub fn drop_random_node<R: Rng>(&mut self, rng: &mut R) {
         self.drops += 1;
+        self.churn += 1;
         let total_weight = self.total_drop_weight();
         let mut drop = rng.gen::<f64>() * total_weight;
         let node_and_prefix = {
@@ -327,6 +341,7 @@ impl Network {
     /// The age of the rejoining node is reduced.
     pub fn rejoin_random_node<R: Rng>(&mut self, rng: &mut R) {
         self.rejoins += 1;
+        self.churn += 1;
         rng.shuffle(&mut self.left_nodes);
         if let Some(mut node) = self.left_nodes.pop() {
             println!("Rejoining node {:?}", node);
@@ -344,10 +359,12 @@ impl fmt::Debug for Network {
     fn fmt(&self, fmt: &mut fmt::Formatter) -> fmt::Result {
         write!(
             fmt,
-            "Network {{\n\tadds: {}\n\tdrops: {}\n\trejoins: {}\n\ttotal nodes: {}\n\n{:?}\nleft_nodes: {:?}\n\n}}",
+            "Network {{\n\tadds: {}\n\tdrops: {}\n\trejoins: {}\n\trelocations: {}\n\ttotal churn: {}\n\ttotal nodes: {}\n\n{:?}\nleft_nodes: {:?}\n\n}}",
             self.adds,
             self.drops,
             self.rejoins,
+            self.relocations,
+            self.churn,
             usize::sum(self.nodes.values().map(|s| s.len())),
             self.nodes.values(),
             self.left_nodes
