@@ -295,7 +295,11 @@ impl Section {
         let mut result = Section::new(merged_prefix);
         // for multi-level merges - the next level must remember to verify against
         // the fully-merged prefix
-        result.verifying_prefix = self.verifying_prefix;
+        result.verifying_prefix = if self.verifying_prefix.len() < other.verifying_prefix.len() {
+            self.verifying_prefix
+        } else {
+            other.verifying_prefix
+        };
         for (_, node) in self.nodes.into_iter().chain(other.nodes.into_iter()) {
             result.add(node);
         }
