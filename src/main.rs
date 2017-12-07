@@ -42,4 +42,14 @@ fn main() {
         network.process_events(&mut rng);
     }
     println!("Network state:\n{:?}", network);
+    println!("");
+
+    let mut age_dist = network.age_distribution();
+    let mut age = 1;
+    println!("Age distribution:");
+    while !age_dist.is_empty() {
+        let num = age_dist.remove(&age).unwrap_or(0);
+        println!("{}\t{}", age, num);
+        age += 1;
+    }
 }

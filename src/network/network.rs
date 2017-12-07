@@ -353,6 +353,16 @@ impl Network {
                 .push(NetworkEvent::Live(node));
         }
     }
+
+    pub fn age_distribution(&self) -> BTreeMap<u8, usize> {
+        let mut result = BTreeMap::new();
+        for (_, section) in &self.nodes {
+            for node in section.nodes() {
+                *result.entry(node.age()).or_insert(0) += 1;
+            }
+        }
+        result
+    }
 }
 
 impl fmt::Debug for Network {
