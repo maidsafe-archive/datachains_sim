@@ -186,6 +186,7 @@ impl Section {
         let trailing_zeros = trailing_zeros(event_hash);
         let node_to_age = self.choose_for_relocation(trailing_zeros);
         if let Some(node) = node_to_age {
+            let _ = self.relocate(node.name());
             vec![SectionEvent::NeedRelocate(node)]
         } else {
             vec![]
