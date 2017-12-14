@@ -2,7 +2,7 @@ use std::collections::BTreeMap;
 use std::fmt;
 use std::mem;
 use std::iter::{Iterator, Sum};
-use rand::Rng;
+use random::{random, shuffle};
 use network::prefix::Prefix;
 use network::node::Node;
 use network::section::Section;
@@ -95,7 +95,7 @@ impl Network {
     /// Sends all events to the corresponding sections and processes the events passed
     /// back. The responses generate new events and the cycle continues until the queues are empty.
     /// Then. if any pending merges are ready, they are processed, too.
-    pub fn process_events<R: Rng>(&mut self, rng: &mut R) {
+    pub fn process_events(&mut self) {
         while self.has_events() {
             let queue = mem::replace(&mut self.event_queue, BTreeMap::new());
             for (prefix, events) in queue {
@@ -113,7 +113,7 @@ impl Network {
                     }
                 }
                 for section_event in section_events {
-                    self.process_single_event(rng, prefix, section_event);
+                    self.process_single_event(prefix, section_event);
                 }
             }
         }
@@ -133,13 +133,13 @@ impl Network {
 
     /// Processes a single response from a section and potentially inserts some events into its
     /// queue
-    fn process_single_event<R: Rng>(&mut self, rng: &mut R, prefix: Prefix, event: SectionEvent) {
+    fn process_single_event(&mut self, prefix: Prefix, event: SectionEvent) {
         match event {
             SectionEvent::NodeDropped(node) => {
                 self.left_nodes.push(node);
             }
             SectionEvent::NeedRelocate(node) => {
-                self.relocate(rng, node);
+                self.relocate(node);
             }
             SectionEvent::RequestMerge => {
                 self.merge(prefix);
@@ -238,10 +238,10 @@ impl Network {
     }
 
     /// Adds a random node to the network by pushing an appropriate event to the queue
-    pub fn add_random_node<R: Rng>(&mut self, rng: &mut R) {
+    pub fn add_random_node(&mut self) {
         self.adds += 1;
         self.churn += 1;
-        let node = Node::new(rng.gen());
+        let node = Node::new(random());
         println!("Adding node {:?}", node);
         let prefix = self.prefix_for_node(node).unwrap();
         self.event_queue
@@ -271,7 +271,7 @@ impl Network {
 
     /// Chooses a new section for the given node, generates a new name for it,
     /// increases its age,  and sends a `Live` event to the section.
-    fn relocate<R: Rng>(&mut self, rng: &mut R, mut node: Node) {
+    fn relocate(&mut self, mut node: Node) {
         self.relocations += 1;
         self.churn += 2; // leaving one section and joining another one
         let (node, neighbour) = {
@@ -283,15 +283,15 @@ impl Network {
                 .keys()
                 .filter(|&pfx| pfx.is_neighbour(src_section))
                 .collect();
-            // prioritise sections with shorter prefixes and having less nodes to balance the network
-            neighbours.sort_by_key(|pfx| (pfx.len(), self.nodes.get(pfx).unwrap().len()));
+            // relocate to the neighbour with the least peers as per the document
+            neighbours.sort_by_key(|pfx| self.nodes.get(pfx).unwrap().len());
             let neighbour = if let Some(n) = neighbours.first() {
                 n
             } else {
                 src_section
             };
             let old_node = node.clone();
-            node.relocate(rng, neighbour);
+            node.relocate(neighbour);
             println!(
                 "Relocating {:?} from {:?} to {:?} as {:?}",
                 old_node,
@@ -309,11 +309,11 @@ impl Network {
 
     /// Drops a random node from the network by sending a `Lost` event to the section.
     /// The probability of a given node dropping is weighted based on its age.
-    pub fn drop_random_node<R: Rng>(&mut self, rng: &mut R) {
+    pub fn drop_random_node(&mut self) {
         self.drops += 1;
         self.churn += 1;
         let total_weight = self.total_drop_weight();
-        let mut drop = rng.gen::<f64>() * total_weight;
+        let mut drop = random::<f64>() * total_weight;
         let node_and_prefix = {
             let mut res = None;
             let nodes_iter = self.nodes.iter().flat_map(|(p, s)| {
@@ -339,10 +339,10 @@ impl Network {
 
     /// Chooses a random node from among the ones that left the network and gets it to rejoin.
     /// The age of the rejoining node is reduced.
-    pub fn rejoin_random_node<R: Rng>(&mut self, rng: &mut R) {
+    pub fn rejoin_random_node(&mut self) {
         self.rejoins += 1;
         self.churn += 1;
-        rng.shuffle(&mut self.left_nodes);
+        shuffle(&mut self.left_nodes);
         if let Some(mut node) = self.left_nodes.pop() {
             println!("Rejoining node {:?}", node);
             node.rejoined();

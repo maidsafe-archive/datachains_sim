@@ -78,10 +78,12 @@ impl Prefix {
         self.len <= other.len && self.matches(Name(other.bits))
     }
 
+    #[allow(unused)]
     pub fn is_child(&self, other: &Prefix) -> bool {
         other.is_ancestor(self)
     }
 
+    #[allow(unused)]
     pub fn is_compatible_with(&self, other: &Prefix) -> bool {
         self.is_ancestor(other) || self.is_child(other)
     }
@@ -113,6 +115,7 @@ impl Prefix {
         name
     }
 
+    #[allow(unused)]
     pub fn from_str(s: &str) -> Option<Prefix> {
         let mut prefix = Self::empty();
         for c in s.chars() {

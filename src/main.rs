@@ -6,8 +6,9 @@ extern crate serde_json;
 extern crate tiny_keccak;
 
 mod network;
+mod random;
 
-use rand::{thread_rng, Rng};
+use random::random_range;
 use network::Network;
 
 /// The probabilities for nodes joining and leaving the network, as percentages.
@@ -18,28 +19,27 @@ const P_DROP: u8 = 7;
 
 /// Generates a random churn event in the network. There are three possible kinds:
 /// node joining, node leaving and node rejoining.
-fn random_event<R: Rng>(network: &mut Network, rng: &mut R) {
-    let x = rng.gen_range(0, 100);
+fn random_event(network: &mut Network) {
+    let x = random_range(0, 100);
     if x < P_ADD {
-        network.add_random_node(rng);
+        network.add_random_node();
     } else if x >= P_ADD && x < P_ADD + P_DROP {
-        network.drop_random_node(rng);
+        network.drop_random_node();
     } else {
-        network.rejoin_random_node(rng);
+        network.rejoin_random_node();
     }
 }
 
 fn main() {
-    let mut rng = thread_rng();
     let mut network = Network::new();
     for i in 0..100000 {
         println!("Iteration {}...", i);
         // Generate a random event...
-        random_event(&mut network, &mut rng);
+        random_event(&mut network);
         // ... and process the churn cascade that may happen
         // (every churn event may trigger other churn events, that
         // may trigger others etc.)
-        network.process_events(&mut rng);
+        network.process_events();
     }
     println!("Network state:\n{:?}", network);
     println!("");

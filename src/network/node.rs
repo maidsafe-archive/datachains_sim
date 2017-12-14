@@ -1,6 +1,6 @@
 use std::fmt;
 use serde_json;
-use rand::Rng;
+use random::random;
 use tiny_keccak::sha3_256;
 use network::prefix::{Name, Prefix};
 
@@ -29,8 +29,8 @@ impl Node {
     }
 
     /// Generates a relocated name and increases the age by 1
-    pub fn relocate<R: Rng>(&mut self, rng: &mut R, prefix: &Prefix) {
-        self.name = prefix.substituted_in(Name(rng.gen()));
+    pub fn relocate(&mut self, prefix: &Prefix) {
+        self.name = prefix.substituted_in(Name(random()));
         self.age += 1;
     }
 
@@ -62,6 +62,7 @@ impl Node {
     }
 
     /// Returns the hash of the node struct
+    #[allow(unused)]
     pub fn hash(&self) -> Digest {
         sha3_256(serde_json::to_string(self).unwrap().as_bytes())
     }
