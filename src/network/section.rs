@@ -215,7 +215,11 @@ impl Section {
         }
         self.nodes.insert(node.name(), node);
         self.update_elders();
-        EventResult::Handled
+        if !node.is_adult() && self.is_complete() {
+            EventResult::Ignored
+        } else {
+            EventResult::Handled
+        }
     }
 
     /// Removes a node from the section and returns whether the event was handled
@@ -225,7 +229,11 @@ impl Section {
         let _ = self.infants.remove(&name);
         self.update_elders();
         if let Some(node) = node {
-            EventResult::HandledWithEvent(SectionEvent::NodeDropped(node))
+            if !node.is_adult() && self.is_complete() {
+                EventResult::Ignored
+            } else {
+                EventResult::HandledWithEvent(SectionEvent::NodeDropped(node))
+            }
         } else {
             EventResult::Ignored
         }
@@ -238,8 +246,12 @@ impl Section {
         let _ = self.adults.remove(&name);
         let _ = self.infants.remove(&name);
         self.update_elders();
-        if node.is_some() {
-            EventResult::Handled
+        if let Some(node) = node {
+            if !node.is_adult() && self.is_complete() {
+                EventResult::Ignored
+            } else {
+                EventResult::Handled
+            }
         } else {
             EventResult::Ignored
         }
