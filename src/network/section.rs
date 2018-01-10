@@ -129,10 +129,18 @@ impl Section {
                 EventResult::Handled
             }
             NetworkEvent::StartMerge(prefix) => {
-                // in order to accept new nodes, we must know that we are merging
-                self.verifying_prefix = prefix;
-                self.merging = true;
-                EventResult::Handled
+                println!(
+                    "MERGE: {:?} (verifying: {:?}) StartMerge({:?})",
+                    self.prefix, self.verifying_prefix, prefix
+                );
+                if prefix.is_ancestor(&self.verifying_prefix) {
+                    // in order to accept new nodes, we must know that we are merging
+                    self.verifying_prefix = prefix;
+                    self.merging = true;
+                    EventResult::Handled
+                } else {
+                    EventResult::Ignored
+                }
             }
         };
         match other_event {
@@ -199,7 +207,7 @@ impl Section {
             // disallow more than one node aged 1 per section if the section is complete
             // (all elders are adults)
             println!("Node {:?} refused in section {:?}", node, self.prefix);
-            return EventResult::Ignored;
+            return EventResult::Handled;
         }
         assert!(
             self.verifying_prefix.matches(node.name()),
@@ -274,7 +282,9 @@ impl Section {
         );
         let (mut section0, mut section1) = (self.clone(), self);
         section0.prefix = prefix0;
+        section0.verifying_prefix = prefix0;
         section1.prefix = prefix1;
+        section1.verifying_prefix = prefix1;
         for (name, node) in &section0.nodes {
             if prefix0.matches(*name) {
                 churn1.push(NetworkEvent::Gone(*node));
@@ -310,6 +320,9 @@ impl Section {
         } else {
             other.verifying_prefix
         };
+        if merged_prefix.len() < result.verifying_prefix.len() {
+            result.verifying_prefix = merged_prefix;
+        }
         for (_, node) in self.nodes.into_iter().chain(other.nodes.into_iter()) {
             result.add(node);
         }
@@ -332,12 +345,13 @@ impl Section {
         };
         let count0 = count_prefix(prefix0);
         let count1 = count_prefix(prefix1);
-        !self.splitting && count0 >= GROUP_SIZE + BUFFER && count1 >= GROUP_SIZE + BUFFER
+        !self.merging && !self.splitting && count0 >= GROUP_SIZE + BUFFER
+            && count1 >= GROUP_SIZE + BUFFER
     }
 
     /// Returns whether the section should merge. If we are already merging, returns false
     pub fn should_merge(&self) -> bool {
-        !self.merging && self.prefix.len() > 0 && if self.is_complete() {
+        !self.merging && !self.splitting && self.prefix.len() > 0 && if self.is_complete() {
             self.adults.len() <= GROUP_SIZE
         } else {
             self.nodes.len() <= GROUP_SIZE

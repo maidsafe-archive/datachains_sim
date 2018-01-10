@@ -83,7 +83,6 @@ impl Prefix {
         other.is_ancestor(self)
     }
 
-    #[allow(unused)]
     pub fn is_compatible_with(&self, other: &Prefix) -> bool {
         self.is_ancestor(other) || self.is_child(other)
     }

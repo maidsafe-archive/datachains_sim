@@ -202,8 +202,14 @@ impl Network {
     /// and prepares queues for churn events to be processed before the merge itself.
     fn merge(&mut self, prefix: Prefix) {
         let merged_pfx = prefix.shorten();
-        if self.pending_merges.contains_key(&merged_pfx) {
-            return;
+        if let Some(&compatible_merge) = self.pending_merges
+            .keys()
+            .find(|pfx| pfx.is_compatible_with(&merged_pfx))
+        {
+            if compatible_merge.is_ancestor(&merged_pfx) {
+                return;
+            }
+            let _ = self.pending_merges.remove(&compatible_merge);
         }
         println!("Initiating a merge into {:?}", merged_pfx);
         let prefixes: Vec<_> = self.nodes
@@ -218,10 +224,7 @@ impl Network {
         let merged_section = self.merged_section(prefixes.iter(), false);
         for pfx in prefixes {
             let events = self.calculate_merge_events(&merged_section, pfx);
-            self.event_queue
-                .entry(pfx)
-                .or_insert_with(Vec::new)
-                .extend(events);
+            let _ = self.event_queue.insert(pfx, events);
         }
     }
 
