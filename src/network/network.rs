@@ -23,7 +23,9 @@ impl PendingMerge {
     /// Creates a new "pending merge" from a set of prefixes - the prefixes passed
     /// are the ones that are supposed to merge
     fn from_prefixes<I: IntoIterator<Item = Prefix>>(pfxs: I) -> Self {
-        PendingMerge { complete: pfxs.into_iter().map(|pfx| (pfx, false)).collect() }
+        PendingMerge {
+            complete: pfxs.into_iter().map(|pfx| (pfx, false)).collect(),
+        }
     }
 
     /// Mark a prefix as having completed the merge
@@ -175,11 +177,13 @@ impl Network {
         let mut sections: Vec<_> = prefixes
             .clone()
             .into_iter()
-            .filter_map(|pfx| if destructive {
-                let _ = self.event_queue.remove(pfx);
-                self.nodes.remove(pfx)
-            } else {
-                self.nodes.get(pfx).cloned()
+            .filter_map(|pfx| {
+                if destructive {
+                    let _ = self.event_queue.remove(pfx);
+                    self.nodes.remove(pfx)
+                } else {
+                    self.nodes.get(pfx).cloned()
+                }
             })
             .collect();
 
@@ -294,10 +298,7 @@ impl Network {
             node.relocate(neighbour);
             println!(
                 "Relocating {:?} from {:?} to {:?} as {:?}",
-                old_node,
-                src_section,
-                neighbour,
-                node
+                old_node, src_section, neighbour, node
             );
             (node, neighbour)
         };
@@ -316,9 +317,9 @@ impl Network {
         let mut drop = random::<f64>() * total_weight;
         let node_and_prefix = {
             let mut res = None;
-            let nodes_iter = self.nodes.iter().flat_map(|(p, s)| {
-                s.nodes().into_iter().map(move |n| (*p, n))
-            });
+            let nodes_iter = self.nodes
+                .iter()
+                .flat_map(|(p, s)| s.nodes().into_iter().map(move |n| (*p, n)));
             for (p, n) in nodes_iter {
                 if n.drop_probability() > drop {
                     res = Some((p, n.name()));
