@@ -1,8 +1,8 @@
-use std::collections::{BTreeSet, BTreeMap};
+use std::collections::{BTreeMap, BTreeSet};
 use std::fmt;
 use network::{BUFFER, GROUP_SIZE};
-use network::prefix::{Prefix, Name};
-use network::node::{Node, Digest};
+use network::prefix::{Name, Prefix};
+use network::node::{Digest, Node};
 use network::churn::{NetworkEvent, SectionEvent};
 
 /// An enum for return values of some methods.
@@ -89,12 +89,11 @@ impl Section {
     /// Returns whether the section has a complete group.
     /// A complete group is GROUP_SIZE nodes that are Adults (have age > 4)
     fn is_complete(&self) -> bool {
-        self.elders.len() == 8 &&
-            self.elders.iter().filter_map(|x| self.nodes.get(x)).all(
-                |n| {
-                    n.is_adult()
-                },
-            )
+        self.elders.len() == 8
+            && self.elders
+                .iter()
+                .filter_map(|x| self.nodes.get(x))
+                .all(|n| n.is_adult())
     }
 
     /// Updates the names of the Elders in the section
@@ -122,8 +121,7 @@ impl Section {
         }
         let other_event = match event {
             NetworkEvent::Live(node) => self.add(node),
-            NetworkEvent::Relocated(node) |
-            NetworkEvent::Gone(node) => self.relocate(node.name()),
+            NetworkEvent::Relocated(node) | NetworkEvent::Gone(node) => self.relocate(node.name()),
             NetworkEvent::Lost(name) => self.remove(name),
             NetworkEvent::PrefixChange(_) => {
                 self.splitting = false;
@@ -162,12 +160,14 @@ impl Section {
                 .filter(|m| m.age() == n.age())
                 .collect::<Vec<_>>()
         });
-        candidates.and_then(|mut cand| if cand.len() <= 1 {
-            cand.first().cloned()
-        } else {
-            let total_xor = cand.iter().fold(0, |total, node| total ^ node.name().0);
-            cand.sort_by_key(|node| node.name().0 ^ total_xor);
-            cand.first().cloned()
+        candidates.and_then(|mut cand| {
+            if cand.len() <= 1 {
+                cand.first().cloned()
+            } else {
+                let total_xor = cand.iter().fold(0, |total, node| total ^ node.name().0);
+                cand.sort_by_key(|node| node.name().0 ^ total_xor);
+                cand.first().cloned()
+            }
         })
     }
 
@@ -262,7 +262,6 @@ impl Section {
         self.prefix
     }
 
-
     /// Splits the section into two and generates the corresponding churn events
     pub fn split(mut self) -> (SplitData, SplitData) {
         self.splitting = false;
@@ -271,9 +270,7 @@ impl Section {
         let (prefix0, prefix1) = (self.prefix.extend(0), self.prefix.extend(1));
         println!(
             "Splitting {:?} into {:?} and {:?}",
-            self.prefix,
-            prefix0,
-            prefix1
+            self.prefix, prefix0, prefix1
         );
         let (mut section0, mut section1) = (self.clone(), self);
         section0.prefix = prefix0;
