@@ -55,6 +55,8 @@ pub struct Network {
     adds: u64,
     /// the number of "drop" random events
     drops: u64,
+    /// the distribution of drops by age
+    drops_dist: BTreeMap<u8, usize>,
     /// the number of "rejoin" random events
     rejoins: u64,
     /// the number of relocations
@@ -79,6 +81,7 @@ impl Network {
         Network {
             adds: 0,
             drops: 0,
+            drops_dist: BTreeMap::new(),
             rejoins: 0,
             relocations: 0,
             churn: 0,
@@ -325,14 +328,16 @@ impl Network {
                 .flat_map(|(p, s)| s.nodes().into_iter().map(move |n| (*p, n)));
             for (p, n) in nodes_iter {
                 if n.drop_probability() > drop {
-                    res = Some((p, n.name()));
+                    res = Some((p, n));
                     break;
                 }
                 drop -= n.drop_probability();
             }
             res
         };
-        node_and_prefix.map(|(prefix, name)| {
+        node_and_prefix.map(|(prefix, node)| {
+            *self.drops_dist.entry(node.age()).or_insert(0) += 1;
+            let name = node.name();
             println!("Dropping node {:?} from section {:?}", name, prefix);
             self.event_queue
                 .entry(prefix)
@@ -370,6 +375,10 @@ impl Network {
             }
         }
         result
+    }
+
+    pub fn drops_distribution(&self) -> BTreeMap<u8, usize> {
+        self.drops_dist.clone()
     }
 }
 

@@ -10,6 +10,7 @@ mod random;
 
 use random::random_range;
 use network::Network;
+use std::collections::BTreeMap;
 
 /// The probabilities for nodes joining and leaving the network, as percentages.
 /// If they don't add up to 100, the remainder is the probability of rejoining
@@ -30,6 +31,15 @@ fn random_event(network: &mut Network) {
     }
 }
 
+fn print_dist(mut dist: BTreeMap<u8, usize>) {
+    let mut age = 1;
+    while !dist.is_empty() {
+        let num = dist.remove(&age).unwrap_or(0);
+        println!("{}\t{}", age, num);
+        age += 1;
+    }
+}
+
 fn main() {
     let mut network = Network::new();
     for i in 0..100000 {
@@ -46,12 +56,11 @@ fn main() {
 
     println!("Number of sections: {}", network.num_sections());
 
-    let mut age_dist = network.age_distribution();
-    let mut age = 1;
+    let age_dist = network.age_distribution();
     println!("Age distribution:");
-    while !age_dist.is_empty() {
-        let num = age_dist.remove(&age).unwrap_or(0);
-        println!("{}\t{}", age, num);
-        age += 1;
-    }
+    print_dist(age_dist);
+
+    let drop_dist = network.drops_distribution();
+    println!("\nDrops distribution by age:");
+    print_dist(drop_dist);
 }
