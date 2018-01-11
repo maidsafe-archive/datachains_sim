@@ -1,5 +1,5 @@
-use network::prefix::{Prefix, Name};
-use network::node::{Node, Digest};
+use network::prefix::{Name, Prefix};
+use network::node::{Digest, Node};
 use serde_json;
 use tiny_keccak::sha3_256;
 
@@ -28,9 +28,7 @@ impl NetworkEvent {
     /// Returns the peer passed in the event (if any).
     pub fn get_node(&self) -> Option<Node> {
         match *self {
-            NetworkEvent::Live(n) |
-            NetworkEvent::Gone(n) |
-            NetworkEvent::Relocated(n) => Some(n),
+            NetworkEvent::Live(n) | NetworkEvent::Gone(n) | NetworkEvent::Relocated(n) => Some(n),
             _ => None,
         }
     }

@@ -1,4 +1,4 @@
-use rand::{self, thread_rng, XorShiftRng, Rand, Rng, SeedableRng};
+use rand::{self, thread_rng, Rand, Rng, SeedableRng, XorShiftRng};
 use rand::distributions::range::SampleRange;
 use std::cell::RefCell;
 use std::env;
