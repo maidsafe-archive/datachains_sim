@@ -44,6 +44,8 @@ fn main() {
     println!("Network state:\n{:?}", network);
     println!("");
 
+    println!("Number of sections: {}", network.num_sections());
+
     let mut age_dist = network.age_distribution();
     let mut age = 1;
     println!("Age distribution:");

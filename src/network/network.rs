@@ -358,6 +358,10 @@ impl Network {
         }
     }
 
+    pub fn num_sections(&self) -> usize {
+        self.nodes.len()
+    }
+
     pub fn age_distribution(&self) -> BTreeMap<u8, usize> {
         let mut result = BTreeMap::new();
         for (_, section) in &self.nodes {
