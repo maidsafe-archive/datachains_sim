@@ -333,16 +333,8 @@ impl Section {
     pub fn should_split(&self) -> bool {
         let prefix0 = self.prefix.extend(0);
         let prefix1 = self.prefix.extend(1);
-        let count_prefix = |prefix: Prefix| {
-            if self.is_complete() {
-                self.adults.iter().filter(|&n| prefix.matches(*n)).count()
-            } else {
-                self.nodes
-                    .iter()
-                    .filter(|&(name, _)| prefix.matches(*name))
-                    .count()
-            }
-        };
+        let count_prefix =
+            |prefix: Prefix| self.adults.iter().filter(|&n| prefix.matches(*n)).count();
         let count0 = count_prefix(prefix0);
         let count1 = count_prefix(prefix1);
         !self.merging && !self.splitting && count0 >= GROUP_SIZE + BUFFER
@@ -351,11 +343,7 @@ impl Section {
 
     /// Returns whether the section should merge. If we are already merging, returns false
     pub fn should_merge(&self) -> bool {
-        !self.merging && !self.splitting && self.prefix.len() > 0 && if self.is_complete() {
-            self.adults.len() <= GROUP_SIZE
-        } else {
-            self.nodes.len() <= GROUP_SIZE
-        }
+        !self.merging && !self.splitting && self.prefix.len() > 0 && self.adults.len() <= GROUP_SIZE
     }
 
     /// Returns a set of all the nodes in the section
