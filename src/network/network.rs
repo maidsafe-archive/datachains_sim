@@ -7,6 +7,7 @@ use network::prefix::Prefix;
 use network::node::Node;
 use network::section::Section;
 use network::churn::{NetworkEvent, SectionEvent};
+use params::Params;
 
 /// A wrapper struct that handles merges in progress
 /// When two sections merge, they need to handle a bunch
@@ -71,11 +72,13 @@ pub struct Network {
     event_queue: BTreeMap<Prefix, Vec<NetworkEvent>>,
     /// prefixes that are in the process of merging
     pending_merges: BTreeMap<Prefix, PendingMerge>,
+    /// Simulation parameters
+    params: Params,
 }
 
 impl Network {
     /// Starts a new network
-    pub fn new() -> Network {
+    pub fn new(params: Params) -> Network {
         let mut nodes = BTreeMap::new();
         nodes.insert(Prefix::empty(), Section::new(Prefix::empty()));
         Network {
@@ -89,6 +92,7 @@ impl Network {
             left_nodes: Vec::new(),
             event_queue: BTreeMap::new(),
             pending_merges: BTreeMap::new(),
+            params,
         }
     }
 
@@ -106,9 +110,10 @@ impl Network {
             for (prefix, events) in queue {
                 let mut section_events = vec![];
                 for event in events {
+                    let params = self.params;
                     let result = self.nodes
                         .get_mut(&prefix)
-                        .map(|section| section.handle_event(event))
+                        .map(|section| section.handle_event(event, &params))
                         .unwrap_or_else(Vec::new);
                     section_events.extend(result);
                     if let NetworkEvent::PrefixChange(pfx) = event {
@@ -194,7 +199,7 @@ impl Network {
             sections.sort_by_key(|s| s.prefix());
             let section1 = sections.pop().unwrap();
             let section2 = sections.pop().unwrap();
-            let section = section1.merge(section2);
+            let section = section1.merge(section2, &self.params);
             sections.push(section);
         }
 
@@ -251,7 +256,7 @@ impl Network {
     pub fn add_random_node(&mut self) {
         self.adds += 1;
         self.churn += 1;
-        let node = Node::new(random());
+        let node = Node::new(random(), self.params.init_age);
         println!("Adding node {:?}", node);
         let prefix = self.prefix_for_node(node).unwrap();
         self.event_queue

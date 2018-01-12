@@ -21,10 +21,10 @@ impl fmt::Debug for Node {
 
 impl Node {
     /// Creates a new node
-    pub fn new(name: u64) -> Node {
+    pub fn new(name: u64, age: u8) -> Node {
         Node {
             name: Name(name),
-            age: 1,
+            age,
         }
     }
 
