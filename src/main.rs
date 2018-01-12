@@ -54,7 +54,11 @@ fn main() {
     println!("Network state:\n{:?}", network);
     println!("");
 
-    println!("Number of sections: {}", network.num_sections());
+    println!(
+        "Number of sections: {} (complete: {})",
+        network.num_sections(),
+        network.complete_sections()
+    );
 
     let age_dist = network.age_distribution();
     println!("Age distribution:");

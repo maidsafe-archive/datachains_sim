@@ -380,6 +380,10 @@ impl Network {
     pub fn drops_distribution(&self) -> BTreeMap<u8, usize> {
         self.drops_dist.clone()
     }
+
+    pub fn complete_sections(&self) -> usize {
+        self.nodes.iter().filter(|&(_, s)| s.is_complete()).count()
+    }
 }
 
 impl fmt::Debug for Network {

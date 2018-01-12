@@ -88,7 +88,7 @@ impl Section {
 
     /// Returns whether the section has a complete group.
     /// A complete group is GROUP_SIZE nodes that are Adults (have age > 4)
-    fn is_complete(&self) -> bool {
+    pub fn is_complete(&self) -> bool {
         self.elders.len() == 8
             && self.elders
                 .iter()
