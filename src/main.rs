@@ -16,19 +16,13 @@ use params::Params;
 use std::collections::BTreeMap;
 use clap::{App, Arg};
 
-/// The probabilities for nodes joining and leaving the network, as percentages.
-/// If they don't add up to 100, the remainder is the probability of rejoining
-/// by a node that was a part of the network, but left.
-const P_ADD: u8 = 90;
-const P_DROP: u8 = 7;
-
 /// Generates a random churn event in the network. There are three possible kinds:
 /// node joining, node leaving and node rejoining.
-fn random_event(network: &mut Network) {
+fn random_event(network: &mut Network, probs: (u8, u8)) {
     let x = random_range(0, 100);
-    if x < P_ADD {
+    if x < probs.0 {
         network.add_random_node();
-    } else if x >= P_ADD && x < P_ADD + P_DROP {
+    } else if x >= probs.0 && x < probs.0 + probs.1 {
         network.drop_random_node();
     } else {
         network.rejoin_random_node();
@@ -69,6 +63,20 @@ fn get_params() -> Params {
                 .long("norejectyoung")
                 .help("Don't reject young peers when one already present in the section"),
         )
+        .arg(
+            Arg::with_name("p_add1")
+                .long("padd1")
+                .value_name("P")
+                .help("Probability that a peer will join during a step (0-100)")
+                .takes_value(true),
+        )
+        .arg(
+            Arg::with_name("p_drop1")
+                .long("pdrop1")
+                .value_name("P")
+                .help("Probability that a peer will be dropped during a step (0-100)")
+                .takes_value(true),
+        )
         .get_matches();
     let init_age = matches
         .value_of("initage")
@@ -82,10 +90,27 @@ fn get_params() -> Params {
         .ok()
         .expect("Split strategy must be \"always\" or \"complete\".");
     let norejectyoung = matches.is_present("norejectyoung");
+    let p_add1 = matches
+        .value_of("p_add1")
+        .unwrap_or("90")
+        .parse()
+        .expect("Add probability must be a number!");
+    assert!(p_add1 < 100, "Probability must be between 0 and 100!");
+    let p_drop1 = matches
+        .value_of("p_drop1")
+        .unwrap_or("7")
+        .parse()
+        .expect("Drop probability must be a number!");
+    assert!(p_drop1 < 100, "Probability must be between 0 and 100!");
+    assert!(
+        p_add1 + p_drop1 <= 100,
+        "Add and drop probabilites must add up to at most 100!"
+    );
     Params {
         init_age,
         split_strategy: split,
         norejectyoung,
+        growth: (p_add1, p_drop1),
     }
 }
 
@@ -96,7 +121,7 @@ fn main() {
     for i in 0..100000 {
         println!("Iteration {}...", i);
         // Generate a random event...
-        random_event(&mut network);
+        random_event(&mut network, params.growth);
         // ... and process the churn cascade that may happen
         // (every churn event may trigger other churn events, that
         // may trigger others etc.)

@@ -22,4 +22,5 @@ pub struct Params {
     pub init_age: u8,
     pub split_strategy: Strategy,
     pub norejectyoung: bool,
+    pub growth: (u8, u8),
 }
