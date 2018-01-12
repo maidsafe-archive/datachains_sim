@@ -211,7 +211,7 @@ impl Section {
             // disallow more than one node aged 1 per section if the section is complete
             // (all elders are adults)
             println!("Node {:?} refused in section {:?}", node, self.prefix);
-            return EventResult::Handled;
+            return EventResult::HandledWithEvent(SectionEvent::NodeRejected(node));
         }
         assert!(
             self.verifying_prefix.matches(node.name()),

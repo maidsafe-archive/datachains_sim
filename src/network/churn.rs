@@ -50,6 +50,7 @@ impl NetworkEvent {
 #[derive(Clone, Copy, Serialize, Deserialize, PartialEq, Eq)]
 pub enum SectionEvent {
     NodeDropped(Node),
+    NodeRejected(Node),
     NeedRelocate(Node),
     RequestMerge,
     RequestSplit,

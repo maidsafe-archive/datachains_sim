@@ -62,6 +62,8 @@ pub struct Network {
     rejoins: u64,
     /// the number of relocations
     relocations: u64,
+    /// the number of rejected nodes
+    rejections: u64,
     /// the total number of churn events
     churn: u64,
     /// all the sections in the network indexed by prefixes
@@ -87,6 +89,7 @@ impl Network {
             drops_dist: BTreeMap::new(),
             rejoins: 0,
             relocations: 0,
+            rejections: 0,
             churn: 0,
             nodes,
             left_nodes: Vec::new(),
@@ -150,6 +153,9 @@ impl Network {
             }
             SectionEvent::NeedRelocate(node) => {
                 self.relocate(node);
+            }
+            SectionEvent::NodeRejected(_) => {
+                self.rejections += 1;
             }
             SectionEvent::RequestMerge => {
                 self.merge(prefix);
@@ -395,11 +401,12 @@ impl fmt::Debug for Network {
     fn fmt(&self, fmt: &mut fmt::Formatter) -> fmt::Result {
         write!(
             fmt,
-            "Network {{\n\tadds: {}\n\tdrops: {}\n\trejoins: {}\n\trelocations: {}\n\ttotal churn: {}\n\ttotal nodes: {}\n\n{:?}\nleft_nodes: {:?}\n\n}}",
+            "Network {{\n\tadds: {}\n\tdrops: {}\n\trejoins: {}\n\trelocations: {}\n\trejections: {}\n\ttotal churn: {}\n\ttotal nodes: {}\n\n{:?}\nleft_nodes: {:?}\n\n}}",
             self.adds,
             self.drops,
             self.rejoins,
             self.relocations,
+            self.rejections,
             self.churn,
             usize::sum(self.nodes.values().map(|s| s.len())),
             self.nodes.values(),

@@ -127,9 +127,11 @@ fn main() {
         // may trigger others etc.)
         network.process_events();
     }
+
     println!("Network state:\n{:?}", network);
     println!("");
 
+    println!("{:?}\n", params);
     println!(
         "Number of sections: {} (complete: {})",
         network.num_sections(),
@@ -137,7 +139,7 @@ fn main() {
     );
 
     let age_dist = network.age_distribution();
-    println!("Age distribution:");
+    println!("\nAge distribution:");
     print_dist(age_dist);
 
     let drop_dist = network.drops_distribution();
