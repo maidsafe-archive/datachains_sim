@@ -112,38 +112,38 @@ impl Section {
     /// events
     pub fn handle_event(&mut self, event: NetworkEvent, params: &Params) -> Vec<SectionEvent> {
         let mut events = vec![];
-        if self.should_merge(params) {
-            self.merging = true;
-            events.push(SectionEvent::RequestMerge);
-        }
-        if self.should_split(params) {
-            self.splitting = true;
-            events.push(SectionEvent::RequestSplit);
-        }
         let other_event = match event {
             NetworkEvent::Live(node) => self.add(node, params),
             NetworkEvent::Relocated(node) | NetworkEvent::Gone(node) => self.relocate(node.name()),
             NetworkEvent::Lost(name) => self.remove(name),
-            NetworkEvent::PrefixChange(_) => {
-                self.splitting = false;
-                self.merging = false;
+            NetworkEvent::PrefixChange(p) => {
+                println!("{:?} PrefixChange to {:?}", self.prefix, p);
                 EventResult::Handled
             }
             NetworkEvent::StartMerge(prefix) => {
-                println!(
-                    "MERGE: {:?} (verifying: {:?}) StartMerge({:?})",
-                    self.prefix, self.verifying_prefix, prefix
-                );
                 if prefix.is_ancestor(&self.verifying_prefix) {
                     // in order to accept new nodes, we must know that we are merging
                     self.verifying_prefix = prefix;
                     self.merging = true;
+                    println!(
+                        "MERGE: {:?} (verifying: {:?}) StartMerge({:?})",
+                        self.prefix, self.verifying_prefix, prefix
+                    );
                     EventResult::Handled
                 } else {
                     EventResult::Ignored
                 }
             }
         };
+        if self.should_merge(params) {
+            self.merging = true;
+            events.push(SectionEvent::RequestMerge);
+        }
+        if self.should_split(params) {
+            self.splitting = true;
+            println!("{:?} Requesting a split", self.prefix);
+            events.push(SectionEvent::RequestSplit);
+        }
         match other_event {
             EventResult::Handled => {
                 events.extend(self.check_ageing(event));
