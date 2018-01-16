@@ -12,4 +12,4 @@ pub const GROUP_SIZE: usize = 8;
 /// GROUP_SIZE + BUFFER nodes
 pub const BUFFER: usize = 3;
 
-pub use self::network::Network;
+pub use self::network::{Network, NetworkStructure};

@@ -11,7 +11,7 @@ mod random;
 mod params;
 
 use random::random_range;
-use network::Network;
+use network::{Network, NetworkStructure};
 use params::Params;
 use std::collections::BTreeMap;
 use clap::{App, Arg};
@@ -123,6 +123,21 @@ fn get_params() -> Params {
     }
 }
 
+fn output_structure_file(file: &str, data: &[NetworkStructure]) {
+    use std::fs::File;
+    use std::io::Write;
+    let mut file = File::create(file)
+        .ok()
+        .expect(&format!("Couldn't create file {}!", file));
+    for (i, data) in data.into_iter().enumerate() {
+        let _ = write!(
+            file,
+            "{} {} {} {}\n",
+            i, data.size, data.sections, data.complete
+        );
+    }
+}
+
 fn main() {
     let params = get_params();
     let mut network = Network::new(params.clone());
@@ -154,4 +169,8 @@ fn main() {
     let drop_dist = &network.output().drops_dist;
     println!("\nDrops distribution by age:");
     print_dist(drop_dist.clone());
+
+    if let Some(ref file) = params.structure_output_file {
+        output_structure_file(file, &network.output().network_structure);
+    }
 }
