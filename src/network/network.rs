@@ -48,6 +48,13 @@ impl PendingMerge {
 }
 
 #[derive(Clone, Default)]
+pub struct NetworkStructure {
+    pub size: usize,
+    pub sections: usize,
+    pub complete: usize,
+}
+
+#[derive(Clone, Default)]
 pub struct Output {
     /// the number of "add" random events
     pub adds: u64,
@@ -63,6 +70,8 @@ pub struct Output {
     pub rejections: u64,
     /// the total number of churn events
     pub churn: u64,
+    /// the structure of the network
+    pub network_structure: Vec<NetworkStructure>,
 }
 
 /// The structure representing the whole network
@@ -104,6 +113,15 @@ impl Network {
         self.event_queue.values().any(|x| !x.is_empty())
     }
 
+    fn capture_network_structure(&mut self) {
+        let structure = NetworkStructure {
+            size: self.nodes.values().map(|x| x.len()).sum(),
+            sections: self.nodes.len(),
+            complete: self.nodes.values().filter(|x| x.is_complete()).count(),
+        };
+        self.output.network_structure.push(structure);
+    }
+
     /// Sends all events to the corresponding sections and processes the events passed
     /// back. The responses generate new events and the cycle continues until the queues are empty.
     /// Then. if any pending merges are ready, they are processed, too.
@@ -142,6 +160,7 @@ impl Network {
             let merged_section = self.merged_section(pending_merge.keys(), true);
             self.nodes.insert(merged_section.prefix(), merged_section);
         }
+        self.capture_network_structure();
     }
 
     /// Processes a single response from a section and potentially inserts some events into its
