@@ -46,7 +46,7 @@ fn get_params() -> Params {
                 .short("i")
                 .long("initage")
                 .value_name("AGE")
-                .help("Sets the initial age of newly joining peers")
+                .help("Sets the initial age of newly joining peers; default: 1")
                 .takes_value(true),
         )
         .arg(
@@ -54,7 +54,7 @@ fn get_params() -> Params {
                 .short("s")
                 .long("split")
                 .value_name("STRATEGY")
-                .help("Selects the strategy for splitting (always/complete)")
+                .help("Selects the strategy for splitting (always/complete); default: complete")
                 .takes_value(true),
         )
         .arg(
@@ -67,14 +67,14 @@ fn get_params() -> Params {
             Arg::with_name("p_add1")
                 .long("padd1")
                 .value_name("P")
-                .help("Probability that a peer will join during a step (0-100)")
+                .help("Probability that a peer will join during a step (0-100); default: 90")
                 .takes_value(true),
         )
         .arg(
             Arg::with_name("p_drop1")
                 .long("pdrop1")
                 .value_name("P")
-                .help("Probability that a peer will be dropped during a step (0-100)")
+                .help("Probability that a peer will be dropped during a step (0-100); default: 7")
                 .takes_value(true),
         )
         .arg(
