@@ -80,6 +80,7 @@ fn get_params() -> Params {
         .arg(
             Arg::with_name("struct_file")
                 .long("network-struct-out")
+                .short("f")
                 .value_name("FILE")
                 .help("Output file for network structure data")
                 .takes_value(true),

@@ -21,8 +21,7 @@ impl NetworkEvent {
     /// Returns the digest of some representation of the network event:
     /// used in ageing (to determine if a peer should be relocated).
     pub fn hash(&self) -> Digest {
-        let serialized = serde_json::to_vec(self).unwrap();
-        sha3_256(&serialized)
+        sha3_256(&serde_json::to_vec(self).unwrap())
     }
 
     /// Returns the peer passed in the event (if any).

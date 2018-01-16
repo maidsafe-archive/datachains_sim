@@ -289,7 +289,8 @@ impl Section {
         section0.verifying_prefix = prefix0;
         section1.prefix = prefix1;
         section1.verifying_prefix = prefix1;
-        for (name, node) in &section0.nodes {
+        for (name, mut node) in & mut section0.nodes {
+            node.increment_age();
             if prefix0.matches(*name) {
                 churn1.push(NetworkEvent::Gone(*node));
             } else if prefix1.matches(*name) {
@@ -327,7 +328,8 @@ impl Section {
         if merged_prefix.len() < result.verifying_prefix.len() {
             result.verifying_prefix = merged_prefix;
         }
-        for (_, node) in self.nodes.into_iter().chain(other.nodes.into_iter()) {
+        for (_, mut node) in self.nodes.into_iter().chain(other.nodes.into_iter()) {
+            node.increment_age();
             result.add(node, params);
         }
         result
