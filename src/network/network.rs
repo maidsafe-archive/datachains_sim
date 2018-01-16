@@ -47,25 +47,29 @@ impl PendingMerge {
     }
 }
 
+#[derive(Clone, Default)]
+pub struct Output {
+    /// the number of "add" random events
+    pub adds: u64,
+    /// the number of "drop" random events
+    pub drops: u64,
+    /// the distribution of drops by age
+    pub drops_dist: BTreeMap<u8, usize>,
+    /// the number of "rejoin" random events
+    pub rejoins: u64,
+    /// the number of relocations
+    pub relocations: u64,
+    /// the number of rejected nodes
+    pub rejections: u64,
+    /// the total number of churn events
+    pub churn: u64,
+}
+
 /// The structure representing the whole network
 /// It's a container for sections that simulates all the
 /// churn and communication between them.
 #[derive(Clone)]
 pub struct Network {
-    /// the number of "add" random events
-    adds: u64,
-    /// the number of "drop" random events
-    drops: u64,
-    /// the distribution of drops by age
-    drops_dist: BTreeMap<u8, usize>,
-    /// the number of "rejoin" random events
-    rejoins: u64,
-    /// the number of relocations
-    relocations: u64,
-    /// the number of rejected nodes
-    rejections: u64,
-    /// the total number of churn events
-    churn: u64,
     /// all the sections in the network indexed by prefixes
     nodes: BTreeMap<Prefix, Section>,
     /// the nodes that left the network and could rejoin in the future
@@ -76,6 +80,8 @@ pub struct Network {
     pending_merges: BTreeMap<Prefix, PendingMerge>,
     /// Simulation parameters
     params: Params,
+    /// Simulation outputs
+    output: Output,
 }
 
 impl Network {
@@ -84,18 +90,12 @@ impl Network {
         let mut nodes = BTreeMap::new();
         nodes.insert(Prefix::empty(), Section::new(Prefix::empty()));
         Network {
-            adds: 0,
-            drops: 0,
-            drops_dist: BTreeMap::new(),
-            rejoins: 0,
-            relocations: 0,
-            rejections: 0,
-            churn: 0,
             nodes,
             left_nodes: Vec::new(),
             event_queue: BTreeMap::new(),
             pending_merges: BTreeMap::new(),
             params,
+            output: Default::default(),
         }
     }
 
@@ -137,7 +137,7 @@ impl Network {
             .collect();
         for pfx in merges_to_finalise {
             println!("Finalising a merge into {:?}", pfx);
-            self.churn += 1; // counting merge as a single churn event
+            self.output.churn += 1; // counting merge as a single churn event
             let pending_merge = self.pending_merges.remove(&pfx).unwrap().into_map();
             let merged_section = self.merged_section(pending_merge.keys(), true);
             self.nodes.insert(merged_section.prefix(), merged_section);
@@ -155,7 +155,7 @@ impl Network {
                 self.relocate(node);
             }
             SectionEvent::NodeRejected(_) => {
-                self.rejections += 1;
+                self.output.rejections += 1;
             }
             SectionEvent::RequestMerge => {
                 self.merge(prefix);
@@ -174,7 +174,7 @@ impl Network {
                         .extend(ev1);
                     self.nodes.insert(sec0.prefix(), sec0);
                     self.nodes.insert(sec1.prefix(), sec1);
-                    self.churn += 1; // counting the split as one churn event
+                    self.output.churn += 1; // counting the split as one churn event
                 }
             }
         }
@@ -260,8 +260,8 @@ impl Network {
 
     /// Adds a random node to the network by pushing an appropriate event to the queue
     pub fn add_random_node(&mut self) {
-        self.adds += 1;
-        self.churn += 1;
+        self.output.adds += 1;
+        self.output.churn += 1;
         let node = Node::new(random(), self.params.init_age);
         println!("Adding node {:?}", node);
         let prefix = self.prefix_for_node(node).unwrap();
@@ -293,8 +293,8 @@ impl Network {
     /// Chooses a new section for the given node, generates a new name for it,
     /// increases its age,  and sends a `Live` event to the section.
     fn relocate(&mut self, mut node: Node) {
-        self.relocations += 1;
-        self.churn += 2; // leaving one section and joining another one
+        self.output.relocations += 1;
+        self.output.churn += 2; // leaving one section and joining another one
         let (node, neighbour) = {
             let src_section = self.nodes
                 .keys()
@@ -328,8 +328,8 @@ impl Network {
     /// Drops a random node from the network by sending a `Lost` event to the section.
     /// The probability of a given node dropping is weighted based on its age.
     pub fn drop_random_node(&mut self) {
-        self.drops += 1;
-        self.churn += 1;
+        self.output.drops += 1;
+        self.output.churn += 1;
         let total_weight = self.total_drop_weight();
         let mut drop = random::<f64>() * total_weight;
         let node_and_prefix = {
@@ -347,7 +347,7 @@ impl Network {
             res
         };
         node_and_prefix.map(|(prefix, node)| {
-            *self.drops_dist.entry(node.age()).or_insert(0) += 1;
+            *self.output.drops_dist.entry(node.age()).or_insert(0) += 1;
             let name = node.name();
             println!("Dropping node {:?} from section {:?}", name, prefix);
             self.event_queue
@@ -360,8 +360,8 @@ impl Network {
     /// Chooses a random node from among the ones that left the network and gets it to rejoin.
     /// The age of the rejoining node is reduced.
     pub fn rejoin_random_node(&mut self) {
-        self.rejoins += 1;
-        self.churn += 1;
+        self.output.rejoins += 1;
+        self.output.churn += 1;
         shuffle(&mut self.left_nodes);
         if let Some(mut node) = self.left_nodes.pop() {
             println!("Rejoining node {:?}", node);
@@ -388,12 +388,12 @@ impl Network {
         result
     }
 
-    pub fn drops_distribution(&self) -> BTreeMap<u8, usize> {
-        self.drops_dist.clone()
-    }
-
     pub fn complete_sections(&self) -> usize {
         self.nodes.iter().filter(|&(_, s)| s.is_complete()).count()
+    }
+
+    pub fn output(&self) -> &Output {
+        &self.output
     }
 }
 
@@ -402,12 +402,12 @@ impl fmt::Debug for Network {
         write!(
             fmt,
             "Network {{\n\tadds: {}\n\tdrops: {}\n\trejoins: {}\n\trelocations: {}\n\trejections: {}\n\ttotal churn: {}\n\ttotal nodes: {}\n\n{:?}\nleft_nodes: {:?}\n\n}}",
-            self.adds,
-            self.drops,
-            self.rejoins,
-            self.relocations,
-            self.rejections,
-            self.churn,
+            self.output.adds,
+            self.output.drops,
+            self.output.rejoins,
+            self.output.relocations,
+            self.output.rejections,
+            self.output.churn,
             usize::sum(self.nodes.values().map(|s| s.len())),
             self.nodes.values(),
             self.left_nodes

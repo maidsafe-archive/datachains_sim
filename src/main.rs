@@ -142,7 +142,7 @@ fn main() {
     println!("\nAge distribution:");
     print_dist(age_dist);
 
-    let drop_dist = network.drops_distribution();
+    let drop_dist = &network.output().drops_dist;
     println!("\nDrops distribution by age:");
-    print_dist(drop_dist);
+    print_dist(drop_dist.clone());
 }
