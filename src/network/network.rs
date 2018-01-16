@@ -131,10 +131,10 @@ impl Network {
             for (prefix, events) in queue {
                 let mut section_events = vec![];
                 for event in events {
-                    let params = self.params;
+                    let params = &self.params;
                     let result = self.nodes
                         .get_mut(&prefix)
-                        .map(|section| section.handle_event(event, &params))
+                        .map(|section| section.handle_event(event, params))
                         .unwrap_or_else(Vec::new);
                     section_events.extend(result);
                     if let NetworkEvent::PrefixChange(pfx) = event {

@@ -77,6 +77,13 @@ fn get_params() -> Params {
                 .help("Probability that a peer will be dropped during a step (0-100)")
                 .takes_value(true),
         )
+        .arg(
+            Arg::with_name("struct_file")
+                .long("network-struct-out")
+                .value_name("FILE")
+                .help("Output file for network structure data")
+                .takes_value(true),
+        )
         .get_matches();
     let init_age = matches
         .value_of("initage")
@@ -106,17 +113,19 @@ fn get_params() -> Params {
         p_add1 + p_drop1 <= 100,
         "Add and drop probabilites must add up to at most 100!"
     );
+    let structure_output_file = matches.value_of("struct_file").map(|s| s.to_owned());
     Params {
         init_age,
         split_strategy: split,
         norejectyoung,
         growth: (p_add1, p_drop1),
+        structure_output_file,
     }
 }
 
 fn main() {
     let params = get_params();
-    let mut network = Network::new(params);
+    let mut network = Network::new(params.clone());
 
     for i in 0..100000 {
         println!("Iteration {}...", i);
@@ -131,7 +140,7 @@ fn main() {
     println!("Network state:\n{:?}", network);
     println!("");
 
-    println!("{:?}\n", params);
+    println!("{:?}\n", params.clone());
     println!(
         "Number of sections: {} (complete: {})",
         network.num_sections(),
