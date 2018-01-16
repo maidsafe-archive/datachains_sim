@@ -384,7 +384,7 @@ impl Network {
         shuffle(&mut self.left_nodes);
         if let Some(mut node) = self.left_nodes.pop() {
             println!("Rejoining node {:?}", node);
-            node.rejoined();
+            node.rejoined(self.params.init_age);
             let prefix = self.prefix_for_node(node).unwrap();
             self.event_queue
                 .entry(prefix)
