@@ -92,6 +92,12 @@ fn get_params() -> Params {
                 .help("Drop probability distribution based on the age: exponential(exp)/reverse-proportional(rev) (default: exponential)")
                 .takes_value(true),
         )
+        .arg(
+            Arg::with_name("age_inc")
+                .long("age-inc")
+                .short("a")
+                .help("Increment node ages on merges and splits")
+        )
         .get_matches();
     let init_age = matches
         .value_of("initage")
@@ -111,6 +117,7 @@ fn get_params() -> Params {
         .ok()
         .expect("Drop distribution must be exp/exponential/rev/reverse-proportional.");
     let norejectyoung = matches.is_present("norejectyoung");
+    let inc_age = matches.is_present("age_inc");
     let p_add1 = matches
         .value_of("p_add1")
         .unwrap_or("90")
@@ -135,6 +142,7 @@ fn get_params() -> Params {
         growth: (p_add1, p_drop1),
         structure_output_file,
         drop_dist,
+        inc_age,
     }
 }
 

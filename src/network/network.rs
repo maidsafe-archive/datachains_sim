@@ -181,7 +181,7 @@ impl Network {
             }
             SectionEvent::RequestSplit => {
                 if let Some(section) = self.nodes.remove(&prefix) {
-                    let ((sec0, ev0), (sec1, ev1)) = section.split();
+                    let ((sec0, ev0), (sec1, ev1)) = section.split(&self.params);
                     let _ = self.event_queue.remove(&prefix);
                     self.event_queue
                         .entry(sec0.prefix())

@@ -56,6 +56,7 @@ impl Node {
     pub fn increment_age(&mut self) {
         self.age = self.age + 1
     }
+
     /// Returns whether the node is an Adult
     pub fn is_adult(&self) -> bool {
         self.age > 4

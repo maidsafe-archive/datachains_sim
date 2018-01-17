@@ -275,7 +275,7 @@ impl Section {
     }
 
     /// Splits the section into two and generates the corresponding churn events
-    pub fn split(mut self) -> (SplitData, SplitData) {
+    pub fn split(mut self, params: &Params) -> (SplitData, SplitData) {
         self.splitting = false;
         let mut churn0 = vec![];
         let mut churn1 = vec![];
@@ -290,7 +290,9 @@ impl Section {
         section1.prefix = prefix1;
         section1.verifying_prefix = prefix1;
         for (name, mut node) in &mut section0.nodes {
-            node.increment_age();
+            if params.inc_age {
+                node.increment_age();
+            }
             if prefix0.matches(*name) {
                 churn1.push(NetworkEvent::Gone(*node));
             } else if prefix1.matches(*name) {
@@ -329,7 +331,9 @@ impl Section {
             result.verifying_prefix = merged_prefix;
         }
         for (_, mut node) in self.nodes.into_iter().chain(other.nodes.into_iter()) {
-            node.increment_age();
+            if params.inc_age {
+                node.increment_age();
+            }
             result.add(node, params);
         }
         result

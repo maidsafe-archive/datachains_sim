@@ -42,4 +42,5 @@ pub struct Params {
     pub growth: (u8, u8),
     pub structure_output_file: Option<String>,
     pub drop_dist: DropDist,
+    pub inc_age: bool,
 }
