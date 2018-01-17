@@ -85,6 +85,13 @@ fn get_params() -> Params {
                 .help("Output file for network structure data")
                 .takes_value(true),
         )
+        .arg(
+            Arg::with_name("drop_dist")
+                .long("drop-dist")
+                .value_name("DISTR")
+                .help("Drop probability distribution based on the age: exponential(exp)/reverse-proportional(rev) (default: exponential)")
+                .takes_value(true),
+        )
         .get_matches();
     let init_age = matches
         .value_of("initage")
@@ -97,6 +104,12 @@ fn get_params() -> Params {
         .parse()
         .ok()
         .expect("Split strategy must be \"always\" or \"complete\".");
+    let drop_dist = matches
+        .value_of("drop_dist")
+        .unwrap_or("exp")
+        .parse()
+        .ok()
+        .expect("Drop distribution must be exp/exponential/rev/reverse-proportional.");
     let norejectyoung = matches.is_present("norejectyoung");
     let p_add1 = matches
         .value_of("p_add1")
@@ -121,6 +134,7 @@ fn get_params() -> Params {
         norejectyoung,
         growth: (p_add1, p_drop1),
         structure_output_file,
+        drop_dist,
     }
 }
 

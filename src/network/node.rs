@@ -3,6 +3,7 @@ use serde_json;
 use random::random;
 use tiny_keccak::sha3_256;
 use network::prefix::{Name, Prefix};
+use params::DropDist;
 
 pub type Digest = [u8; 32];
 
@@ -61,8 +62,11 @@ impl Node {
     }
 
     /// Returns the weight used in randomly choosing a node to be dropped
-    pub fn drop_probability(&self) -> f64 {
-        10.0 / self.age as f64
+    pub fn drop_probability(&self, dist: DropDist) -> f64 {
+        match dist {
+            DropDist::RevProp => 10.0 / self.age as f64,
+            DropDist::Exponential => 2.0f64.powf(-(self.age as f64)),
+        }
     }
 
     /// Returns the hash of the node struct

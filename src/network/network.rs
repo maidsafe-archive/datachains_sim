@@ -297,7 +297,7 @@ impl Network {
         self.nodes
             .iter()
             .flat_map(|(_, s)| s.nodes().into_iter())
-            .map(|n| n.drop_probability())
+            .map(|n| n.drop_probability(self.params.drop_dist))
             .sum()
     }
 
@@ -357,11 +357,11 @@ impl Network {
                 .iter()
                 .flat_map(|(p, s)| s.nodes().into_iter().map(move |n| (*p, n)));
             for (p, n) in nodes_iter {
-                if n.drop_probability() > drop {
+                if n.drop_probability(self.params.drop_dist) > drop {
                     res = Some((p, n));
                     break;
                 }
-                drop -= n.drop_probability();
+                drop -= n.drop_probability(self.params.drop_dist);
             }
             res
         };

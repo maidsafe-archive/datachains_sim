@@ -289,7 +289,7 @@ impl Section {
         section0.verifying_prefix = prefix0;
         section1.prefix = prefix1;
         section1.verifying_prefix = prefix1;
-        for (name, mut node) in & mut section0.nodes {
+        for (name, mut node) in &mut section0.nodes {
             node.increment_age();
             if prefix0.matches(*name) {
                 churn1.push(NetworkEvent::Gone(*node));
