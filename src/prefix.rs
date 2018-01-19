@@ -1,8 +1,17 @@
+use parse::ParseError;
+use rand::{Rand, Rng};
 use std::fmt;
+use std::str::FromStr;
 
-/// A helper struct that only has the purpose of pretty-printing debug information
-#[derive(Clone, Copy, PartialOrd, Ord, PartialEq, Eq, Serialize, Deserialize)]
+/// A network name to identify nodes.
+#[derive(Clone, Copy, PartialOrd, Ord, PartialEq, Eq, Hash)]
 pub struct Name(pub u64);
+
+impl Rand for Name {
+    fn rand<R: Rng>(rng: &mut R) -> Self {
+        Name(rng.gen())
+    }
+}
 
 impl fmt::Debug for Name {
     fn fmt(&self, fmt: &mut fmt::Formatter) -> fmt::Result {
@@ -17,15 +26,17 @@ impl fmt::Debug for Name {
 
 /// A structure representing a network prefix - a simplified version of the Prefix struct from
 /// `routing`
-#[derive(Clone, Copy, PartialOrd, Ord, PartialEq, Eq, Serialize, Deserialize)]
+#[derive(Clone, Copy, PartialOrd, Ord, PartialEq, Eq, Hash)]
 pub struct Prefix {
     len: u8,
     bits: u64,
 }
 
 impl Prefix {
-    pub fn empty() -> Prefix {
-        Prefix { bits: 0, len: 0 }
+    pub const EMPTY: Self = Prefix { bits: 0, len: 0 };
+
+    pub fn len(&self) -> u8 {
+        self.len
     }
 
     pub fn extend(self, bit: u8) -> Prefix {
@@ -39,19 +50,7 @@ impl Prefix {
         }
     }
 
-    pub fn len(&self) -> u8 {
-        self.len
-    }
-
-    fn len_mask(&self) -> u64 {
-        if self.len == 0 {
-            0
-        } else {
-            (-1i64 as u64) << (64 - self.len)
-        }
-    }
-
-    pub fn shorten(self) -> Prefix {
+    pub fn shorten(self) -> Self {
         if self.len < 1 {
             return self;
         }
@@ -59,6 +58,14 @@ impl Prefix {
         Prefix {
             bits: self.bits & mask,
             len: self.len - 1,
+        }
+    }
+
+    pub fn sibling(self) -> Self {
+        if self.len > 0 {
+            self.with_flipped_bit(self.len - 1)
+        } else {
+            self
         }
     }
 
@@ -79,12 +86,12 @@ impl Prefix {
     }
 
     #[allow(unused)]
-    pub fn is_child(&self, other: &Prefix) -> bool {
+    pub fn is_descendant(&self, other: &Prefix) -> bool {
         other.is_ancestor(self)
     }
 
     pub fn is_compatible_with(&self, other: &Prefix) -> bool {
-        self.is_ancestor(other) || self.is_child(other)
+        self.is_ancestor(other) || self.is_descendant(other)
     }
 
     pub fn is_sibling(&self, other: &Prefix) -> bool {
@@ -114,10 +121,21 @@ impl Prefix {
         name
     }
 
-    #[allow(unused)]
-    pub fn from_str(s: &str) -> Option<Prefix> {
-        let mut prefix = Self::empty();
-        for c in s.chars() {
+    fn len_mask(&self) -> u64 {
+        if self.len == 0 {
+            0
+        } else {
+            (-1i64 as u64) << (64 - self.len)
+        }
+    }
+}
+
+impl FromStr for Prefix {
+    type Err = ParseError;
+
+    fn from_str(input: &str) -> Result<Self, Self::Err> {
+        let mut prefix = Self::EMPTY;
+        for c in input.chars() {
             match c {
                 '0' => {
                     prefix = prefix.extend(0);
@@ -126,29 +144,31 @@ impl Prefix {
                     prefix = prefix.extend(1);
                 }
                 _ => {
-                    return None;
+                    return Err(ParseError);
                 }
             }
         }
-        Some(prefix)
+        Ok(prefix)
     }
+}
 
-    pub fn to_string(&self) -> String {
-        let mut result = String::new();
+impl fmt::Display for Prefix {
+    fn fmt(&self, fmt: &mut fmt::Formatter) -> fmt::Result {
         for i in 0..self.len {
             let mask = 1 << (63 - i);
             if self.bits & mask == 0 {
-                result.push('0');
+                write!(fmt, "0")?;
             } else {
-                result.push('1');
+                write!(fmt, "1")?;
             }
         }
-        result
+
+        Ok(())
     }
 }
 
 impl fmt::Debug for Prefix {
     fn fmt(&self, fmt: &mut fmt::Formatter) -> fmt::Result {
-        write!(fmt, "Prefix({})", self.to_string())
+        write!(fmt, "Prefix({})", self)
     }
 }

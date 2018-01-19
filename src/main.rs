@@ -1,199 +1,165 @@
+extern crate colored;
 extern crate clap;
 extern crate rand;
-extern crate serde;
-#[macro_use]
-extern crate serde_derive;
-extern crate serde_json;
 extern crate tiny_keccak;
 
+mod chain;
+mod log;
+mod message;
 mod network;
-mod random;
+mod node;
 mod params;
+mod parse;
+mod prefix;
+mod random;
+mod section;
+mod stats;
 
-use random::random_range;
-use network::{Network, NetworkStructure};
+use clap::{App, Arg, ArgMatches};
+use colored::Colorize;
+use network::Network;
 use params::Params;
-use std::collections::BTreeMap;
-use clap::{App, Arg};
+use random::Seed;
+use std::collections;
+use std::collections::hash_map::DefaultHasher;
+use std::hash::BuildHasherDefault;
+use std::str::FromStr;
 
-/// Generates a random churn event in the network. There are three possible kinds:
-/// node joining, node leaving and node rejoining.
-fn random_event(network: &mut Network, probs: (u8, u8)) {
-    let x = random_range(0, 100);
-    if x < probs.0 {
-        network.add_random_node();
-    } else if x >= probs.0 && x < probs.0 + probs.1 {
-        network.drop_random_node();
-    } else {
-        network.rejoin_random_node();
+type Age = u64;
+
+fn main() {
+    let params = get_params();
+    let mut ticks = 0;
+
+    random::reseed(params.seed);
+    let mut network = Network::new(params.clone());
+
+    for i in 0..params.num_iterations {
+        ticks = i + 1;
+
+        println!(
+            "{}",
+            format!("Iteration: {}", format!("{}", i).bold()).green()
+        );
+
+        if !network.tick() {
+            break;
+        }
     }
-}
 
-fn print_dist(mut dist: BTreeMap<u8, usize>) {
-    let mut age = 1;
-    while !dist.is_empty() {
-        let num = dist.remove(&age).unwrap_or(0);
-        println!("{}\t{}", age, num);
-        age += 1;
+    println!("");
+    println!("{:?}", params);
+
+    println!("");
+    println!("Total iterations: {}", ticks);
+    println!("Age distribution:");
+    for (age, count) in network.age_dist() {
+        println!("{:4}: {}", age, count);
+    }
+
+    if let Some(path) = params.file {
+        network.stats().write_samples_to_file(path);
     }
 }
 
 fn get_params() -> Params {
-    let matches = App::new("Ageing Simulation")
-        .about("Simulates ageing in SAFE network")
+    let matches = App::new("SAFE network simulation")
+        .about("Simulates evolution of SAFE network")
         .arg(
-            Arg::with_name("initage")
+            Arg::with_name("SEED")
+                .short("S")
+                .long("seed")
+                .help("Random seed")
+                .takes_value(true),
+        )
+        .arg(
+            Arg::with_name("ITERATIONS")
+                .short("n")
+                .long("iterations")
+                .help("Number of simulation iterations")
+                .takes_value(true)
+                .default_value("100000"),
+        )
+        .arg(
+            Arg::with_name("GROUP_SIZE")
+                .short("g")
+                .long("group-size")
+                .help("Group size")
+                .takes_value(true)
+                .default_value("8"),
+        )
+        .arg(
+            Arg::with_name("INIT_AGE")
                 .short("i")
-                .long("initage")
-                .value_name("AGE")
-                .help("Sets the initial age of newly joining peers; default: 1")
-                .takes_value(true),
+                .long("init-age")
+                .help("Initial age of newly joining nodes")
+                .takes_value(true)
+                .default_value("1"),
         )
         .arg(
-            Arg::with_name("split")
+            Arg::with_name("ADULT_AGE")
+                .short("a")
+                .long("adult-age")
+                .help("Age at which a node becomes adult")
+                .takes_value(true)
+                .default_value("5"),
+        )
+        .arg(
+            Arg::with_name("MAX_SECTION_SIZE")
                 .short("s")
-                .long("split")
-                .value_name("STRATEGY")
-                .help("Selects the strategy for splitting (always/complete); default: complete")
-                .takes_value(true),
+                .long("max-section-size")
+                .help(
+                    "Maximum section size (number of nodes) before the simulation fails",
+                )
+                .takes_value(true)
+                .default_value("60"),
         )
         .arg(
-            Arg::with_name("norejectyoung")
-                .short("y")
-                .long("norejectyoung")
-                .help("Don't reject young peers when one already present in the section"),
+            Arg::with_name("MAX_RELOCATION_ATTEMPTS")
+                .short("r")
+                .long("max-relocation-attempts")
+                .help("Maximum number of relocation attempts after a Live event")
+                .takes_value(true)
+                .default_value("5"),
         )
         .arg(
-            Arg::with_name("p_add1")
-                .long("padd1")
-                .value_name("P")
-                .help("Probability that a peer will join during a step (0-100); default: 90")
-                .takes_value(true),
-        )
-        .arg(
-            Arg::with_name("p_drop1")
-                .long("pdrop1")
-                .value_name("P")
-                .help("Probability that a peer will be dropped during a step (0-100); default: 7")
-                .takes_value(true),
-        )
-        .arg(
-            Arg::with_name("struct_file")
-                .long("network-struct-out")
+            Arg::with_name("FILE")
+                .long("file")
                 .short("f")
-                .value_name("FILE")
                 .help("Output file for network structure data")
                 .takes_value(true),
         )
-        .arg(
-            Arg::with_name("drop_dist")
-                .long("drop-dist")
-                .value_name("DISTR")
-                .help("Drop probability distribution based on the age: exponential(exp)/reverse-proportional(rev) (default: exponential)")
-                .takes_value(true),
-        )
-        .arg(
-            Arg::with_name("age_inc")
-                .long("age-inc")
-                .short("a")
-                .help("Increment node ages on merges and splits")
-        )
         .get_matches();
-    let init_age = matches
-        .value_of("initage")
-        .unwrap_or("1")
-        .parse()
-        .expect("Initial age must be a number!");
-    let split = matches
-        .value_of("split")
-        .unwrap_or("complete")
-        .parse()
-        .ok()
-        .expect("Split strategy must be \"always\" or \"complete\".");
-    let drop_dist = matches
-        .value_of("drop_dist")
-        .unwrap_or("exp")
-        .parse()
-        .ok()
-        .expect("Drop distribution must be exp/exponential/rev/reverse-proportional.");
-    let norejectyoung = matches.is_present("norejectyoung");
-    let inc_age = matches.is_present("age_inc");
-    let p_add1 = matches
-        .value_of("p_add1")
-        .unwrap_or("90")
-        .parse()
-        .expect("Add probability must be a number!");
-    assert!(p_add1 < 100, "Probability must be between 0 and 100!");
-    let p_drop1 = matches
-        .value_of("p_drop1")
-        .unwrap_or("7")
-        .parse()
-        .expect("Drop probability must be a number!");
-    assert!(p_drop1 < 100, "Probability must be between 0 and 100!");
-    assert!(
-        p_add1 + p_drop1 <= 100,
-        "Add and drop probabilites must add up to at most 100!"
-    );
-    let structure_output_file = matches.value_of("struct_file").map(|s| s.to_owned());
+
+    let seed = match matches.value_of("SEED") {
+        Some(seed) => seed.parse().expect("SEED must be in form `[1, 2, 3, 4]`"),
+        None => Seed::random(),
+    };
+
     Params {
-        init_age,
-        split_strategy: split,
-        norejectyoung,
-        growth: (p_add1, p_drop1),
-        structure_output_file,
-        drop_dist,
-        inc_age,
+        seed,
+        num_iterations: get_number(&matches, "ITERATIONS"),
+        group_size: get_number(&matches, "GROUP_SIZE"),
+        init_age: get_number(&matches, "INIT_AGE"),
+        adult_age: get_number(&matches, "ADULT_AGE"),
+        max_section_size: get_number(&matches, "MAX_SECTION_SIZE"),
+        max_relocation_attempts: get_number(&matches, "MAX_RELOCATION_ATTEMPTS"),
+        file: matches.value_of("FILE").map(String::from),
     }
 }
 
-fn output_structure_file(file: &str, data: &[NetworkStructure]) {
-    use std::fs::File;
-    use std::io::Write;
-    let mut file = File::create(file)
-        .ok()
-        .expect(&format!("Couldn't create file {}!", file));
-    for (i, data) in data.into_iter().enumerate() {
-        let _ = write!(
-            file,
-            "{} {} {} {}\n",
-            i, data.size, data.sections, data.complete
-        );
+fn get_number<T: Number>(matches: &ArgMatches, name: &str) -> T {
+    match matches.value_of(name).unwrap().parse() {
+        Ok(value) => value,
+        Err(_) => panic!("{} must be a number.", name),
     }
 }
 
-fn main() {
-    let params = get_params();
-    let mut network = Network::new(params.clone());
+trait Number: FromStr {}
+impl Number for usize {}
+impl Number for u64 {}
 
-    for i in 0..100000 {
-        println!("Iteration {}...", i);
-        // Generate a random event...
-        random_event(&mut network, params.growth);
-        // ... and process the churn cascade that may happen
-        // (every churn event may trigger other churn events, that
-        // may trigger others etc.)
-        network.process_events();
-    }
-
-    println!("Network state:\n{:?}", network);
-    println!("");
-
-    println!("{:?}\n", params.clone());
-    println!(
-        "Number of sections: {} (complete: {})",
-        network.num_sections(),
-        network.complete_sections()
-    );
-
-    let age_dist = network.age_distribution();
-    println!("\nAge distribution:");
-    print_dist(age_dist);
-
-    let drop_dist = &network.output().drops_dist;
-    println!("\nDrops distribution by age:");
-    print_dist(drop_dist.clone());
-
-    if let Some(ref file) = params.structure_output_file {
-        output_structure_file(file, &network.output().network_structure);
-    }
-}
+// Use these type aliases instead of the default collections to make sure
+// we use consistent hashing across runs, to enable deterministic results.
+type HashMap<K, V> = collections::HashMap<K, V, BuildHasherDefault<DefaultHasher>>;
+type HashSet<T> = collections::HashSet<T, BuildHasherDefault<DefaultHasher>>;
