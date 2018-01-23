@@ -1,5 +1,6 @@
 extern crate colored;
 extern crate clap;
+extern crate ctrlc;
 extern crate rand;
 extern crate tiny_keccak;
 
@@ -27,6 +28,8 @@ use std::collections::hash_map::DefaultHasher;
 use std::hash::BuildHasherDefault;
 use std::panic;
 use std::str::FromStr;
+use std::sync::Arc;
+use std::sync::atomic::{AtomicBool, Ordering};
 
 type Age = u64;
 
@@ -45,6 +48,13 @@ fn main() {
 
     log::set_verbosity(params.verbosity);
 
+    // Set SIGINT (Ctrl+C) handler.
+    let running = Arc::new(AtomicBool::new(true));
+    {
+        let running = Arc::clone(&running);
+        let _ = ctrlc::set_handler(move || { running.store(false, Ordering::Relaxed); });
+    }
+
     let mut network = Network::new(params.clone());
 
     for i in 0..params.num_iterations {
@@ -53,13 +63,13 @@ fn main() {
             format!("Iteration: {}", format!("{}", i).bold()).green()
         );
 
-        let run = network.tick(i);
+        let result = network.tick(i);
 
         if params.stats_frequency > 0 && i % params.stats_frequency == 0 {
             print_tick_stats(&network);
         }
 
-        if !run {
+        if !result || !running.load(Ordering::Relaxed) {
             break;
         }
     }
