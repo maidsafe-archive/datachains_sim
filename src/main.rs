@@ -22,7 +22,7 @@ use colored::Colorize;
 use network::Network;
 use params::{Params, RelocationStrategy};
 use random::Seed;
-use std::collections::{self, BTreeMap};
+use std::collections;
 use std::collections::hash_map::DefaultHasher;
 use std::hash::BuildHasherDefault;
 use std::panic;
@@ -53,24 +53,26 @@ fn main() {
             format!("Iteration: {}", format!("{}", i).bold()).green()
         );
 
-        if !network.tick() {
+        let run = network.tick(i);
+
+        if params.stats_frequency > 0 && i % params.stats_frequency == 0 {
+            print_tick_stats(&network);
+        }
+
+        if !run {
             break;
         }
     }
 
+    println!("\n===== Summary =====");
     println!("\n{:?}\n", params);
-
-    let complete = network.num_complete_sections();
-    network.stats().print_summary(complete);
-
-    println!("\nAge distribution:");
-    print_dist(&network.age_dist());
-
-    println!("\nSection size distribution:");
-    print_dist(&network.section_size_dist());
-
-    println!("\nPrefix length distribution:");
-    print_dist(&network.prefix_len_dist());
+    println!("{}", network.stats().summary());
+    println!("Age distribution:");
+    println!("{}", network.age_dist());
+    println!("Section size distribution:");
+    println!("{}", network.section_size_dist());
+    println!("Prefix length distribution:");
+    println!("{}", network.prefix_len_dist());
 
     if let Some(path) = params.file {
         network.stats().write_to_file(path);
@@ -156,6 +158,16 @@ fn get_params() -> Params {
                 .default_value("o"),
         )
         .arg(
+            Arg::with_name("STATS_FREQUENCY")
+                .short("F")
+                .long("stats-frequency")
+                .help(
+                    "how often (every which iteration) to output network statistics",
+                )
+                .takes_value(true)
+                .default_value("10"),
+        )
+        .arg(
             Arg::with_name("FILE")
                 .long("file")
                 .short("f")
@@ -185,9 +197,20 @@ fn get_params() -> Params {
         max_relocation_attempts: get_number(&matches, "MAX_RELOCATION_ATTEMPTS"),
         max_infants_per_section: get_number(&matches, "MAX_INFANTS_PER_SECTION"),
         relocation_strategy,
+        stats_frequency: get_number(&matches, "STATS_FREQUENCY"),
         file: matches.value_of("FILE").map(String::from),
         verbosity: matches.occurrences_of("VERBOSITY") as usize + 1,
     }
+}
+
+fn print_tick_stats(network: &Network) {
+    println!(
+        "Header {:?}, AgeDist {:?}, SectionSizeDist {:?}, PrefixLenDist {:?}",
+        network.stats().summary(),
+        network.age_dist(),
+        network.section_size_dist(),
+        network.prefix_len_dist(),
+    )
 }
 
 fn get_number<T: Number>(matches: &ArgMatches, name: &str) -> T {
@@ -200,34 +223,6 @@ fn get_number<T: Number>(matches: &ArgMatches, name: &str) -> T {
 trait Number: FromStr {}
 impl Number for usize {}
 impl Number for u64 {}
-
-fn print_dist<K, V>(dist: &BTreeMap<K, V>)
-where
-    K: Copy,
-    V: Copy,
-    u64: From<K> + From<V>,
-{
-    println!(
-        "Min: {:6}",
-        dist.keys().map(|k| u64::from(*k)).min().unwrap_or(0)
-    );
-    println!(
-        "Max: {:6}",
-        dist.keys().map(|k| u64::from(*k)).max().unwrap_or(0)
-    );
-
-    let mut avg = 0f64;
-    let mut sum = 0f64;
-    for (key, value) in dist {
-        let value = u64::from(*value) as f64;
-
-        sum += value;
-        avg += value * u64::from(*key) as f64;
-    }
-
-    let avg = avg / sum;
-    println!("Avg: {:6.2}", avg)
-}
 
 // Use these type aliases instead of the default collections to make sure
 // we use consistent hashing across runs, to enable deterministic results.

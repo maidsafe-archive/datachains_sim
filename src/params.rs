@@ -24,6 +24,8 @@ pub struct Params {
     pub max_infants_per_section: usize,
     /// Relocation strategy
     pub relocation_strategy: RelocationStrategy,
+    /// Print statistics every Nth iteration (supress if 0)
+    pub stats_frequency: u64,
     /// File to store  network structure data.
     pub file: Option<String>,
     /// Log veribosity

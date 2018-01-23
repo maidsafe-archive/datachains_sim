@@ -1,4 +1,3 @@
-use Age;
 use HashMap;
 use log;
 use message::{Request, Response};
@@ -7,8 +6,7 @@ use params::Params;
 use prefix::Prefix;
 use random;
 use section::Section;
-use stats::Stats;
-use std::collections::BTreeMap;
+use stats::{Distribution, Stats};
 use std::ops::AddAssign;
 
 pub struct Network {
@@ -35,11 +33,12 @@ impl Network {
     /// Execute single iteration of the simulation. Returns `true` if the
     /// simulation is running successfuly so far, `false` if it failed and should
     /// be stopped.
-    pub fn tick(&mut self) -> bool {
+    pub fn tick(&mut self, iterations: u64) -> bool {
         self.generate_random_messages();
         let stats = self.handle_messages();
 
         self.stats.record(
+            iterations,
             self.num_nodes,
             self.sections.len() as u64,
             stats.merges,
@@ -55,6 +54,7 @@ impl Network {
         &self.stats
     }
 
+    #[allow(unused)]
     pub fn num_complete_sections(&self) -> u64 {
         self.sections
             .values()
@@ -62,34 +62,23 @@ impl Network {
             .count() as u64
     }
 
-    pub fn age_dist(&self) -> BTreeMap<Age, u64> {
-        let mut result = BTreeMap::new();
-        for node in self.sections.values().flat_map(
-            |section| section.nodes().values(),
+    pub fn age_dist(&self) -> Distribution {
+        Distribution::new(
+            self.sections
+                .values()
+                .flat_map(|section| section.nodes().values())
+                .map(|node| node.age() as u64),
         )
-        {
-            *result.entry(node.age()).or_insert(0) += 1;
-        }
-
-        result
     }
 
-    pub fn section_size_dist(&self) -> BTreeMap<u64, u64> {
-        let mut result = BTreeMap::new();
-        for section in self.sections.values() {
-            *result.entry(section.nodes().len() as u64).or_insert(0) += 1;
-        }
-
-        result
+    pub fn section_size_dist(&self) -> Distribution {
+        Distribution::new(self.sections.values().map(
+            |section| section.nodes().len() as u64,
+        ))
     }
 
-    pub fn prefix_len_dist(&self) -> BTreeMap<u8, u64> {
-        let mut result = BTreeMap::new();
-        for prefix in self.sections.keys() {
-            *result.entry(prefix.len()).or_insert(0) += 1;
-        }
-
-        result
+    pub fn prefix_len_dist(&self) -> Distribution {
+        Distribution::new(self.sections.keys().map(|prefix| prefix.len() as u64))
     }
 
     fn generate_random_messages(&mut self) {
