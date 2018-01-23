@@ -3,6 +3,7 @@ use prefix::Name;
 use rand::{Rand, Rng};
 use random;
 use std::fmt;
+use std::ops::Deref;
 use tiny_keccak::sha3_256;
 
 #[derive(Clone)]
@@ -87,6 +88,7 @@ impl Hash {
         Hash(sha3_256(&self.0))
     }
 
+    #[allow(unused)]
     pub fn trailing_zeros(&self) -> u64 {
         let mut result = 0;
         for digit in self.0.iter().rev() {
@@ -99,6 +101,14 @@ impl Hash {
         }
 
         result as u64
+    }
+}
+
+impl Deref for Hash {
+    type Target = [u8; 32];
+
+    fn deref(&self) -> &Self::Target {
+        &self.0
     }
 }
 

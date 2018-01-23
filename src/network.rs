@@ -105,7 +105,7 @@ impl Network {
             }
         }
 
-        println!(
+        info!(
             "Random Adds: {} Drops: {}",
             log::important(adds),
             log::important(drops)
@@ -212,7 +212,8 @@ impl Network {
             section.nodes().len() > self.params.max_section_size
         })
         {
-            println!(
+            // TODO: print more info
+            error!(
                 "{}: {}",
                 log::prefix(&section.prefix()),
                 log::error("too many nodes")

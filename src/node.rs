@@ -75,6 +75,13 @@ pub fn count_adults<'a, I: IntoIterator<Item = &'a Node>>(params: &Params, nodes
         .count()
 }
 
+pub fn count_infants<'a, I: IntoIterator<Item = &'a Node>>(params: &Params, nodes: I) -> usize {
+    nodes
+        .into_iter()
+        .filter(|node| node.is_infant(params))
+        .count()
+}
+
 /// Returns the nodes sorted by age (from youngest to oldest).
 pub fn by_age<'a, I: IntoIterator<Item = &'a Node>>(nodes: I) -> Vec<&'a Node> {
     let mut nodes: Vec<_> = nodes.into_iter().collect();

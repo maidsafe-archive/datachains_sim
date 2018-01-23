@@ -3,8 +3,10 @@ extern crate clap;
 extern crate rand;
 extern crate tiny_keccak;
 
-mod chain;
+#[macro_use]
 mod log;
+
+mod chain;
 mod message;
 mod network;
 mod node;
@@ -18,11 +20,10 @@ mod stats;
 use clap::{App, Arg, ArgMatches};
 use colored::Colorize;
 use network::Network;
-use params::Params;
+use params::{Params, RelocationStrategy};
 use random::Seed;
 use std::collections::{self, BTreeMap};
 use std::collections::hash_map::DefaultHasher;
-use std::fmt::Display;
 use std::hash::BuildHasherDefault;
 use std::panic;
 use std::str::FromStr;
@@ -31,6 +32,7 @@ type Age = u64;
 
 fn main() {
     let params = get_params();
+
     let seed = params.seed;
     random::reseed(seed);
 
@@ -41,13 +43,12 @@ fn main() {
         println!("{:?}", seed);
     }));
 
+    log::set_verbosity(params.verbosity);
+
     let mut network = Network::new(params.clone());
 
-    let mut ticks = 0;
     for i in 0..params.num_iterations {
-        ticks = i + 1;
-
-        println!(
+        info!(
             "{}",
             format!("Iteration: {}", format!("{}", i).bold()).green()
         );
@@ -57,11 +58,10 @@ fn main() {
         }
     }
 
-    println!("");
-    println!("{:?}\n", params);
+    println!("\n{:?}\n", params);
 
-    println!("Total iterations:  {}", ticks);
-    println!("Complete sections: {}", network.num_complete_sections());
+    let complete = network.num_complete_sections();
+    network.stats().print_summary(complete);
 
     println!("\nAge distribution:");
     print_dist(&network.age_dist());
@@ -135,18 +135,42 @@ fn get_params() -> Params {
                 .default_value("5"),
         )
         .arg(
+            Arg::with_name("MAX_INFANTS_PER_SECTION")
+                .short("I")
+                .long("max-infants-per-section")
+                .help("Maximum number of infants per section")
+                .takes_value(true)
+                .default_value("1"),
+        )
+        .arg(
+            Arg::with_name("RELOCATION_STRATEGY")
+                .short("R")
+                .long("relocation-strategy")
+                .help("Relocation strategy (o = oldest first, y = youngest first)")
+                .takes_value(true)
+                .possible_values(&["o", "y"])
+                .hide_possible_values(true)
+                .default_value("o"),
+        )
+        .arg(
             Arg::with_name("FILE")
                 .long("file")
                 .short("f")
                 .help("Output file for network structure data")
                 .takes_value(true),
         )
+        .arg(Arg::with_name("VERBOSITY").short("v").multiple(true).help(
+            "Log verbosity",
+        ))
         .get_matches();
 
     let seed = match matches.value_of("SEED") {
         Some(seed) => seed.parse().expect("SEED must be in form `[1, 2, 3, 4]`"),
         None => Seed::random(),
     };
+
+    let relocation_strategy =
+        RelocationStrategy::from_str(matches.value_of("RELOCATION_STRATEGY").unwrap()).unwrap();
 
     Params {
         seed,
@@ -156,7 +180,10 @@ fn get_params() -> Params {
         adult_age: get_number(&matches, "ADULT_AGE"),
         max_section_size: get_number(&matches, "MAX_SECTION_SIZE"),
         max_relocation_attempts: get_number(&matches, "MAX_RELOCATION_ATTEMPTS"),
+        max_infants_per_section: get_number(&matches, "MAX_INFANTS_PER_SECTION"),
+        relocation_strategy,
         file: matches.value_of("FILE").map(String::from),
+        verbosity: matches.occurrences_of("VERBOSITY") as usize + 1,
     }
 }
 
@@ -171,10 +198,32 @@ trait Number: FromStr {}
 impl Number for usize {}
 impl Number for u64 {}
 
-fn print_dist<K: Display, V: Display>(dist: &BTreeMap<K, V>) {
+fn print_dist<K, V>(dist: &BTreeMap<K, V>)
+where
+    K: Copy,
+    V: Copy,
+    u64: From<K> + From<V>,
+{
+    println!(
+        "Min: {:6}",
+        dist.keys().map(|k| u64::from(*k)).min().unwrap_or(0)
+    );
+    println!(
+        "Max: {:6}",
+        dist.keys().map(|k| u64::from(*k)).max().unwrap_or(0)
+    );
+
+    let mut avg = 0u64;
+    let mut sum = 0u64;
     for (key, value) in dist {
-        println!("{:4}: {}", key, value);
+        let value = u64::from(*value);
+
+        sum += value;
+        avg += value + u64::from(*key);
     }
+
+    let avg = avg as f64 / sum as f64;
+    println!("Avg: {:6.2}", avg)
 }
 
 // Use these type aliases instead of the default collections to make sure

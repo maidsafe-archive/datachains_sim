@@ -36,7 +36,7 @@ impl Stats {
         self.total_relocations += relocations;
         self.total_rejections += rejections;
 
-        println!(
+        info!(
             "Nodes: {} \
              Sections: {} \
              Merges: {} \
@@ -59,6 +59,28 @@ impl Stats {
             relocations: self.total_relocations,
             rejections: self.total_rejections,
         })
+    }
+
+    pub fn print_summary(&self, complete: u64) {
+        if let Some(last) = self.samples.last() {
+            println!(
+                "Iterations:  {:>8}\n\
+                 Nodes:       {:>8}\n\
+                 Sections:    {:>8} (complete: {})\n\
+                 Merges:      {:>8}\n\
+                 Splits:      {:>8}\n\
+                 Relocations: {:>8}\n\
+                 Rejections:  {:>8}",
+                self.samples.len(),
+                last.nodes,
+                last.sections,
+                complete,
+                last.merges,
+                last.splits,
+                last.relocations,
+                last.rejections,
+            )
+        }
     }
 
     pub fn write_to_file<P: AsRef<Path>>(&self, path: P) {
