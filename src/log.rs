@@ -12,6 +12,7 @@ pub fn error<T: ToString>(msg: T) -> ColoredString {
     msg.to_string().red()
 }
 
+#[allow(unused)]
 pub fn name(name: &Name) -> ColoredString {
     format!("{:?}", name).bright_blue()
 }
@@ -24,6 +25,7 @@ pub fn prefix(prefix: &Prefix) -> ColoredString {
     }
 }
 
+#[allow(unused)]
 pub fn message<T: Debug>(msg: &T) -> ColoredString {
     format!("{:?}", msg).bright_magenta()
 }

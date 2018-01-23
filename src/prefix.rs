@@ -35,6 +35,7 @@ pub struct Prefix {
 impl Prefix {
     pub const EMPTY: Self = Prefix { bits: 0, len: 0 };
 
+    #[allow(unused)]
     pub fn len(&self) -> u8 {
         self.len
     }
@@ -59,6 +60,10 @@ impl Prefix {
             bits: self.bits & mask,
             len: self.len - 1,
         }
+    }
+
+    pub fn split(self) -> [Prefix; 2] {
+        [self.extend(0), self.extend(1)]
     }
 
     pub fn sibling(self) -> Self {
@@ -90,10 +95,12 @@ impl Prefix {
         other.is_ancestor(self)
     }
 
+    #[allow(unused)]
     pub fn is_compatible_with(&self, other: &Prefix) -> bool {
         self.is_ancestor(other) || self.is_descendant(other)
     }
 
+    #[allow(unused)]
     pub fn is_sibling(&self, other: &Prefix) -> bool {
         if self.len > 0 {
             (*self).with_flipped_bit(self.len - 1) == *other
@@ -102,6 +109,7 @@ impl Prefix {
         }
     }
 
+    #[allow(unused)]
     pub fn is_neighbour(&self, other: &Prefix) -> bool {
         let diff = self.bits ^ other.bits;
         let bit = diff.leading_zeros() as u8;

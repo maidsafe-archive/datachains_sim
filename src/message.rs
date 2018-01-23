@@ -17,16 +17,18 @@ pub enum Request {
 
 #[derive(Debug)]
 pub enum Response {
-    /// Add new section.
-    Add(Section),
-    /// Remove section with the given prefix.
-    Remove(Prefix),
+    /// Merge sections.
+    Merge(Section, Prefix),
+    /// Split section.
+    Split(Section, Section, Prefix),
     /// Reject an attempt to join a section.
     Reject(Node),
     /// Relocate the given node to a section with matching prefix.
     Relocate(Node),
     /// Send a request to the section with the given prefix.
     Send(Prefix, Request),
-    /// Fails the simulation due to a section having too many nodes.
-    Fail(Prefix),
+    /// Node has been added (used only for recording statistics)
+    Add,
+    /// Node has been dropped (used only for recording statistics)
+    Drop,
 }

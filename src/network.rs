@@ -5,14 +5,17 @@ use message::{Request, Response};
 use node::{self, Node};
 use params::Params;
 use prefix::Prefix;
-use random::{self, random};
+use random;
 use section::Section;
 use stats::Stats;
+use std::collections::BTreeMap;
+use std::ops::AddAssign;
 
 pub struct Network {
     params: Params,
     stats: Stats,
     sections: HashMap<Prefix, Section>,
+    num_nodes: u64,
 }
 
 impl Network {
@@ -25,6 +28,7 @@ impl Network {
             params,
             stats: Stats::new(),
             sections,
+            num_nodes: 0,
         }
     }
 
@@ -33,105 +37,126 @@ impl Network {
     /// be stopped.
     pub fn tick(&mut self) -> bool {
         self.generate_random_messages();
-        let result = self.handle_messages();
+        let stats = self.handle_messages();
 
-        let num_nodes = self.sections
-            .values()
-            .map(|section| section.nodes().len() as u64)
-            .sum();
-        let num_sections = self.sections.len() as u64;
-        let num_complete = self.sections
-            .values()
-            .filter(|section| section.is_complete(&self.params))
-            .count() as u64;
-
-        self.stats.record_sample(
-            num_nodes,
-            num_sections,
-            num_complete,
+        self.stats.record(
+            self.num_nodes,
+            self.sections.len() as u64,
+            stats.merges,
+            stats.splits,
+            stats.relocations,
+            stats.rejections,
         );
 
-        self.stats.print_last();
-
-        result
+        self.check_section_sizes()
     }
 
     pub fn stats(&self) -> &Stats {
         &self.stats
     }
 
-    pub fn age_dist(&self) -> Vec<(Age, u64)> {
-        let mut dist = HashMap::default();
+    pub fn num_complete_sections(&self) -> u64 {
+        self.sections
+            .values()
+            .filter(|section| section.is_complete(&self.params))
+            .count() as u64
+    }
+
+    pub fn age_dist(&self) -> BTreeMap<Age, u64> {
+        let mut result = BTreeMap::new();
         for node in self.sections.values().flat_map(
             |section| section.nodes().values(),
         )
         {
-            *dist.entry(node.age()).or_insert(0) += 1;
+            *result.entry(node.age()).or_insert(0) += 1;
         }
 
-        let mut dist: Vec<_> = dist.into_iter().collect();
-        dist.sort_by_key(|&(age, _)| age);
-        dist
+        result
+    }
+
+    pub fn section_size_dist(&self) -> BTreeMap<u64, u64> {
+        let mut result = BTreeMap::new();
+        for section in self.sections.values() {
+            *result.entry(section.nodes().len() as u64).or_insert(0) += 1;
+        }
+
+        result
     }
 
     fn generate_random_messages(&mut self) {
+        let mut adds = 0;
+        let mut drops = 0;
+
         for section in self.sections.values_mut() {
-            if random() {
+            if random::gen() {
                 add_random_node(&self.params, section);
-                drop_random_node(&self.params, section);
+                adds += 1;
+
+                if drop_random_node(&self.params, section) {
+                    drops += 1;
+                }
             } else {
-                drop_random_node(&self.params, section);
+                if drop_random_node(&self.params, section) {
+                    drops += 1;
+                }
+
                 add_random_node(&self.params, section);
+                adds += 1;
             }
         }
+
+        println!(
+            "Random Adds: {} Drops: {}",
+            log::important(adds),
+            log::important(drops)
+        );
     }
 
-    fn handle_messages(&mut self) -> bool {
+    fn handle_messages(&mut self) -> TickStats {
         let mut responses = Vec::new();
+        let mut stats = TickStats::new();
 
         loop {
             for section in self.sections.values_mut() {
                 responses.extend(section.handle_requests(&self.params));
             }
 
-            if let Some(result) = self.handle_responses(&mut responses) {
-                return result;
+            if responses.is_empty() {
+                break;
             }
+
+            stats += self.handle_responses(&mut responses)
         }
+
+        stats
     }
 
-    fn handle_responses(&mut self, responses: &mut Vec<Response>) -> Option<bool> {
-        if responses.is_empty() {
-            return Some(true);
-        }
+    fn handle_responses(&mut self, responses: &mut Vec<Response>) -> TickStats {
+        let mut stats = TickStats::new();
 
         for response in responses.drain(..) {
             match response {
-                Response::Add(section) => {
+                Response::Merge(section, old_prefix) => {
+                    stats.merges += 1;
                     self.sections
                         .entry(section.prefix())
-                        .or_insert_with(|| {
-                            println!(
-                                "{}: {}",
-                                log::prefix(&section.prefix()),
-                                log::important("section added")
-                            );
-                            Section::new(section.prefix())
-                        })
-                        .merge(section)
+                        .or_insert_with(|| Section::new(section.prefix()))
+                        .merge(&self.params, section);
+                    let _ = self.sections.remove(&old_prefix);
                 }
-                Response::Remove(prefix) => {
-                    println!(
-                        "{}: {}",
-                        log::prefix(&prefix),
-                        log::important("section removed")
-                    );
-                    let _ = self.sections.remove(&prefix);
+                Response::Split(section0, section1, old_prefix) => {
+                    stats.splits += 1;
+                    assert!(self.sections.insert(section0.prefix(), section0).is_none());
+                    assert!(self.sections.insert(section1.prefix(), section1).is_none());
+                    let _ = self.sections.remove(&old_prefix);
                 }
                 Response::Reject(_) => {
-                    self.stats.record_reject();
+                    stats.rejections += 1;
                 }
-                Response::Relocate(node) => self.handle_relocate(node),
+                Response::Relocate(node) => {
+                    stats.relocations += 1;
+                    self.handle_relocate(node)
+                }
                 Response::Send(prefix, request) => {
                     match request {
                         Request::Merge(target_prefix) => {
@@ -155,19 +180,20 @@ impl Network {
                                     log::prefix(&prefix),
                                     log::error("not found")
                                 );
-
                             }
                         }
-                    };
+                    }
                 }
-                Response::Fail(prefix) => {
-                    println!("{}: {}", log::prefix(&prefix), log::error("too many nodes"));
-                    return Some(false);
+                Response::Add => {
+                    self.num_nodes += 1;
+                }
+                Response::Drop => {
+                    self.num_nodes -= 1;
                 }
             }
         }
 
-        None
+        stats
     }
 
     fn handle_relocate(&mut self, node: Node) {
@@ -180,16 +206,32 @@ impl Network {
             unreachable!()
         }
     }
+
+    fn check_section_sizes(&self) -> bool {
+        if let Some(section) = self.sections.values().find(|section| {
+            section.nodes().len() > self.params.max_section_size
+        })
+        {
+            println!(
+                "{}: {}",
+                log::prefix(&section.prefix()),
+                log::error("too many nodes")
+            );
+            false
+        } else {
+            true
+        }
+    }
 }
 
 // Generate random `Live` request in the given section.
 fn add_random_node(params: &Params, section: &mut Section) {
-    let name = section.prefix().substituted_in(random());
-    section.receive(Request::Live(Node::new(name, params.init_age)))
+    let name = section.prefix().substituted_in(random::gen());
+    section.receive(Request::Live(Node::new(name, params.init_age)));
 }
 
 // Generate random `Dead` request in the given section.
-fn drop_random_node(_params: &Params, section: &mut Section) {
+fn drop_random_node(_params: &Params, section: &mut Section) -> bool {
     let name = node::by_age(section.nodes().values())
         .into_iter()
         .find(|node| {
@@ -198,6 +240,36 @@ fn drop_random_node(_params: &Params, section: &mut Section) {
         .map(|node| node.name());
 
     if let Some(name) = name {
-        section.receive(Request::Dead(name))
+        section.receive(Request::Dead(name));
+        true
+    } else {
+        false
+    }
+}
+
+struct TickStats {
+    merges: u64,
+    splits: u64,
+    relocations: u64,
+    rejections: u64,
+}
+
+impl TickStats {
+    fn new() -> Self {
+        TickStats {
+            merges: 0,
+            splits: 0,
+            relocations: 0,
+            rejections: 0,
+        }
+    }
+}
+
+impl AddAssign for TickStats {
+    fn add_assign(&mut self, other: Self) {
+        self.merges += other.merges;
+        self.splits += other.splits;
+        self.relocations += other.relocations;
+        self.rejections += other.rejections;
     }
 }

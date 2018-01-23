@@ -20,20 +20,30 @@ use colored::Colorize;
 use network::Network;
 use params::Params;
 use random::Seed;
-use std::collections;
+use std::collections::{self, BTreeMap};
 use std::collections::hash_map::DefaultHasher;
+use std::fmt::Display;
 use std::hash::BuildHasherDefault;
+use std::panic;
 use std::str::FromStr;
 
 type Age = u64;
 
 fn main() {
     let params = get_params();
-    let mut ticks = 0;
+    let seed = params.seed;
+    random::reseed(seed);
 
-    random::reseed(params.seed);
+    // Print seed on panic.
+    let default_hook = panic::take_hook();
+    panic::set_hook(Box::new(move |info| {
+        default_hook(info);
+        println!("{:?}", seed);
+    }));
+
     let mut network = Network::new(params.clone());
 
+    let mut ticks = 0;
     for i in 0..params.num_iterations {
         ticks = i + 1;
 
@@ -48,17 +58,19 @@ fn main() {
     }
 
     println!("");
-    println!("{:?}", params);
+    println!("{:?}\n", params);
 
-    println!("");
-    println!("Total iterations: {}", ticks);
-    println!("Age distribution:");
-    for (age, count) in network.age_dist() {
-        println!("{:4}: {}", age, count);
-    }
+    println!("Total iterations:  {}", ticks);
+    println!("Complete sections: {}", network.num_complete_sections());
+
+    println!("\nAge distribution:");
+    print_dist(&network.age_dist());
+
+    println!("\nSection size distribution:");
+    print_dist(&network.section_size_dist());
 
     if let Some(path) = params.file {
-        network.stats().write_samples_to_file(path);
+        network.stats().write_to_file(path);
     }
 }
 
@@ -94,7 +106,7 @@ fn get_params() -> Params {
                 .long("init-age")
                 .help("Initial age of newly joining nodes")
                 .takes_value(true)
-                .default_value("1"),
+                .default_value("4"),
         )
         .arg(
             Arg::with_name("ADULT_AGE")
@@ -158,6 +170,12 @@ fn get_number<T: Number>(matches: &ArgMatches, name: &str) -> T {
 trait Number: FromStr {}
 impl Number for usize {}
 impl Number for u64 {}
+
+fn print_dist<K: Display, V: Display>(dist: &BTreeMap<K, V>) {
+    for (key, value) in dist {
+        println!("{:4}: {}", key, value);
+    }
+}
 
 // Use these type aliases instead of the default collections to make sure
 // we use consistent hashing across runs, to enable deterministic results.

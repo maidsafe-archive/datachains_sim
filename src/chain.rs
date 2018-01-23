@@ -1,55 +1,58 @@
 use Age;
 use prefix::Name;
+use rand::{Rand, Rng};
+use random;
 use std::fmt;
-use std::mem;
-use std::slice;
 use tiny_keccak::sha3_256;
 
 #[derive(Clone)]
 pub struct Chain {
-    blocks: Vec<Block>,
+    // blocks: Vec<Block>,
 }
 
 impl Chain {
     pub fn new() -> Self {
-        Chain { blocks: Vec::new() }
+        // Chain { blocks: Vec::new() }
+        Chain {}
     }
 
-    pub fn insert(&mut self, event: Event, name: Name, age: Age) {
-        self.blocks.push(Block { event, name, age });
+    pub fn insert(&mut self, _event: Event, _name: Name, _age: Age) {
+        // self.blocks.push(Block { event, name, age });
         // self.verify()
     }
 
-    pub fn extend(&mut self, other: Chain) {
-        self.blocks.extend(other.blocks);
+    pub fn extend(&mut self, _other: Chain) {
+        // self.blocks.extend(other.blocks);
         // self.verify()
     }
 
-    // Find last (newest) `Live` block with the given node name.
-    pub fn last_live_of(&self, name: Name) -> Option<&Block> {
-        self.blocks.iter().rev().find(|block| {
-            block.event == Event::Live && block.name == name
-        })
+    pub fn relocation_hash(&self, _name: Option<Name>) -> Option<Hash> {
+        Some(random::gen())
+        // name.and_then(|name| self.last_live_of(name))
+        //     .or_else(|| self.last_live())
+        //     .map(|block| block.hash())
     }
 
-    // Find last (newest) `Live` block.
-    pub fn last_live(&self) -> Option<&Block> {
-        self.blocks.iter().rev().find(
-            |block| block.event == Event::Live,
-        )
-    }
+    // fn last_live_of(&self, name: Name) -> Option<&Block> {
+    //     self.blocks.iter().rev().find(|block| {
+    //         block.event == Event::Live && block.name == name
+    //     })
+    // }
+
+    // fn last_live(&self) -> Option<&Block> {
+    //     self.blocks.iter().rev().find(
+    //         |block| block.event == Event::Live,
+    //     )
+    // }
 }
 
 impl fmt::Debug for Chain {
     fn fmt(&self, fmt: &mut fmt::Formatter) -> fmt::Result {
-        write!(
-            fmt,
-            "Chain(len={})",
-            self.blocks.len(),
-        )
+        write!(fmt, "Chain")
     }
 }
 
+/*
 #[derive(Clone)]
 pub struct Block {
     event: Event,
@@ -67,6 +70,7 @@ impl Block {
         Hash(sha3_256(slice))
     }
 }
+*/
 
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]
 pub enum Event {
@@ -95,5 +99,11 @@ impl Hash {
         }
 
         result as u64
+    }
+}
+
+impl Rand for Hash {
+    fn rand<R: Rng>(rng: &mut R) -> Self {
+        Hash(rng.gen())
     }
 }

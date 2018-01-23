@@ -1,6 +1,5 @@
 use parse::ParseError;
 use rand::{self, Rand, Rng, SeedableRng, XorShiftRng};
-use rand::distributions::range::SampleRange;
 use std::cell::RefCell;
 use std::str::FromStr;
 
@@ -50,13 +49,8 @@ pub fn reseed(seed: Seed) {
 }
 
 /// Random value from the thread-local weak RNG.
-pub fn random<T: Rand>() -> T {
+pub fn gen<T: Rand>() -> T {
     with_rng(|rng| rng.gen())
-}
-
-/// Random value from a range from the thread-local weak RNG.
-pub fn random_range<T: Rand + PartialOrd + SampleRange>(min: T, max: T) -> T {
-    with_rng(|rng| rng.gen_range(min, max))
 }
 
 /// Sample values from an iterator.
@@ -68,22 +62,9 @@ where
     with_rng(|rng| rand::sample(rng, iterable, amount))
 }
 
-/// Sample a single value from an iterator.
-pub fn sample_single<T, I>(iterable: I) -> Option<T>
-where
-    I: IntoIterator<Item = T>,
-{
-    sample(iterable, 1).pop()
-}
-
-/// Shuffle the mutable slice in place.
-pub fn shuffle<T>(values: &mut [T]) {
-    with_rng(|rng| rng.shuffle(values))
-}
-
 /// Generate random boolean with the given probability that it comes up true.
 pub fn gen_bool_with_probability(p: f64) -> bool {
-    random::<f64>() <= p
+    gen::<f64>() <= p
 }
 
 fn with_rng<F: FnOnce(&mut XorShiftRng) -> R, R>(f: F) -> R {

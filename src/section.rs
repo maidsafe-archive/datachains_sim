@@ -1,17 +1,17 @@
 use HashMap;
 use HashSet;
 use chain::{Chain, Event, Hash};
-use log;
 use message::{Request, Response};
 use node::{self, Node};
 use params::Params;
 use prefix::{Name, Prefix};
-use random::random;
+use random;
 use std::fmt;
 use std::mem;
 
 pub struct Section {
     prefix: Prefix,
+    state: State,
     nodes: HashMap<Name, Node>,
     chain: Chain,
     requests: Vec<Request>,
@@ -21,6 +21,7 @@ impl Section {
     pub fn new(prefix: Prefix) -> Self {
         Section {
             prefix,
+            state: State::Stable,
             nodes: HashMap::default(),
             chain: Chain::new(),
             requests: Vec::new(),
@@ -51,12 +52,11 @@ impl Section {
         let mut responses = Vec::new();
 
         for request in mem::replace(&mut self.requests, Vec::new()) {
-            println!(
-                "{}: received {}",
-                log::prefix(&self.prefix),
-                log::message(&request)
-            );
-
+            // println!(
+            //     "{}: received {}",
+            //     log::prefix(&self.prefix),
+            //     log::message(&request)
+            // );
             responses.extend(match request {
                 Request::Live(node) => self.handle_live(params, node),
                 Request::Dead(name) => self.handle_dead(params, name),
@@ -67,15 +67,44 @@ impl Section {
         responses
     }
 
-    pub fn merge(&mut self, other: Section) {
+    pub fn merge(&mut self, params: &Params, other: Section) {
         assert_eq!(self.prefix, other.prefix);
         self.chain.extend(other.chain);
         self.nodes.extend(other.nodes);
         self.requests.extend(other.requests);
+        self.update_elders(params);
     }
 
     /// Handle new node attempt to join us.
     fn handle_live(&mut self, params: &Params, node: Node) -> Vec<Response> {
+        // If we are splitting or merging, forward the request to the target
+        // section(s) of the split/merge.
+        match self.state {
+            State::Stable => (),
+            State::Splitting => {
+                for prefix in &self.prefix.split() {
+                    if prefix.matches(node.name()) {
+                        // println!(
+                        //     "{}: split in progress. Forwarding request to {}",
+                        //     log::prefix(&self.prefix),
+                        //     log::prefix(prefix)
+                        // );
+                        return vec![Response::Send(*prefix, Request::Live(node))];
+                    }
+                }
+
+                unreachable!()
+            }
+            State::Merging(prefix) => {
+                // println!(
+                //     "{}: merge in progress. Forwarding request to {}",
+                //     log::prefix(&self.prefix),
+                //     log::prefix(&prefix)
+                // );
+                return vec![Response::Send(prefix, Request::Live(node))];
+            }
+        }
+
         if self.prefix == Prefix::EMPTY {
             // If we are the root section (our prefix is empty), bump everyone's
             // (except the new node) age by one.
@@ -92,36 +121,35 @@ impl Section {
         self.add_node(node);
         self.update_elders(params);
 
-        // Check if we have too many nodes.
-        if self.nodes.len() > params.max_section_size {
-            return vec![Response::Fail(self.prefix)];
+        let mut responses = vec![Response::Add];
+
+        let split_responses = self.try_split(params);
+        if !split_responses.is_empty() {
+            responses.extend(split_responses)
+        } else if is_adult {
+            responses.extend(self.try_relocate(params, Some(name)))
         }
 
-        let responses = self.try_split(params);
-        if !responses.is_empty() {
-            responses
-        } else if is_adult {
-            self.try_relocate(params, Some(name))
-        } else {
-            Vec::new()
-        }
+        responses
     }
 
     fn handle_dead(&mut self, params: &Params, name: Name) -> Vec<Response> {
-        if let Some(node) = self.remove_node(name) {
+        let mut responses = Vec::with_capacity(1);
+
+        if let Some(node) = self.drop_node(name) {
             self.update_elders(params);
 
-            let responses = self.try_merge(params);
-            if !responses.is_empty() {
-                return responses;
-            }
+            responses.push(Response::Drop);
 
-            if node.is_adult(params) {
-                return self.try_relocate(params, None);
+            let merge_responses = self.try_merge(params);
+            if !merge_responses.is_empty() {
+                responses.extend(merge_responses);
+            } else if node.is_adult(params) {
+                responses.extend(self.try_relocate(params, None));
             }
         }
 
-        Vec::new()
+        responses
     }
 
     fn handle_merge(&mut self, _params: &Params, parent: Prefix) -> Vec<Response> {
@@ -137,39 +165,39 @@ impl Section {
         section.chain = self.chain.clone();
         section.nodes = mem::replace(&mut self.nodes, HashMap::default());
 
-        vec![Response::Add(section), Response::Remove(self.prefix)]
+        self.state = State::Merging(parent);
+
+        vec![Response::Merge(section, self.prefix)]
     }
 
     fn try_split(&mut self, params: &Params) -> Vec<Response> {
         // We can only split if both section post-split would remain with at least
         // 2 * GROUP_SIZE - QUORUM adults.
 
-        let prefix0 = self.prefix.extend(0);
-        let prefix1 = self.prefix.extend(1);
+        let prefixes = self.prefix.split();
 
         let num_adults0 = node::count_adults(
             params,
             self.nodes.values().filter(
-                |node| prefix0.matches(node.name()),
+                |node| prefixes[0].matches(node.name()),
             ),
         );
 
         let num_adults1 = node::count_adults(
             params,
             self.nodes.values().filter(
-                |node| prefix1.matches(node.name()),
+                |node| prefixes[1].matches(node.name()),
             ),
         );
 
         let limit = 2 * params.group_size - params.quorum();
         if num_adults0 >= limit && num_adults1 >= limit {
-            println!(
-                "{}: {} into {} and {}",
-                log::prefix(&self.prefix),
-                log::important("initiating split"),
-                log::prefix(&prefix0),
-                log::prefix(&prefix1)
-            );
+            // println!(
+            //     "{}: initiating split into {} and {}",
+            //     log::prefix(&self.prefix),
+            //     log::prefix(&prefixes[0]),
+            //     log::prefix(&prefixes[1])
+            // );
 
             for node in self.nodes.values_mut() {
                 node.increment_age();
@@ -179,16 +207,19 @@ impl Section {
                 }
             }
 
-            let mut section0 = Section::new(prefix0);
-            let mut section1 = Section::new(prefix1);
+            let mut section0 = Section::new(prefixes[0]);
+            let mut section1 = Section::new(prefixes[1]);
 
             section0.chain = self.chain.clone();
             section1.chain = self.chain.clone();
 
             let (nodes0, nodes1) = self.nodes.drain().partition(
-                |&(name, _)| if prefix0.matches(name) {
+                |&(name, _)| if prefixes[0].matches(
+                    name,
+                )
+                {
                     true
-                } else if prefix1.matches(name) {
+                } else if prefixes[1].matches(name) {
                     false
                 } else {
                     unreachable!()
@@ -196,13 +227,14 @@ impl Section {
             );
 
             section0.nodes = nodes0;
-            section1.nodes = nodes1;
+            section0.update_elders(params);
 
-            vec![
-                Response::Add(section0),
-                Response::Add(section1),
-                Response::Remove(self.prefix),
-            ]
+            section1.nodes = nodes1;
+            section1.update_elders(params);
+
+            self.state = State::Splitting;
+
+            vec![Response::Split(section0, section1, self.prefix)]
         } else {
             Vec::new()
         }
@@ -222,13 +254,12 @@ impl Section {
         let sibling = self.prefix.sibling();
         let parent = self.prefix.shorten();
 
-        println!(
-            "{}: {} with {} into {}",
-            log::prefix(&self.prefix),
-            log::important("initiating merge"),
-            log::prefix(&sibling),
-            log::prefix(&parent)
-        );
+        // println!(
+        //     "{}: initiating merge with {} into {}",
+        //     log::prefix(&self.prefix),
+        //     log::prefix(&sibling),
+        //     log::prefix(&parent)
+        // );
 
         vec![
             Response::Send(self.prefix, Request::Merge(parent)),
@@ -242,14 +273,12 @@ impl Section {
             return Vec::new();
         }
 
-        let mut hash = live_name
-            .and_then(|name| self.chain.last_live_of(name))
-            .or_else(|| self.chain.last_live())
-            .expect("no Live block in the chain")
-            .hash();
+        let mut hash = self.chain.relocation_hash(live_name).expect(
+            "no Live block in the chain",
+        );
 
         for _ in 0..params.max_relocation_attempts {
-            if let Some(name) = self.check_relocate(&hash) {
+            if let Some(name) = self.check_relocate(params, &hash) {
                 return self.relocate(name);
             } else {
                 hash = hash.hash();
@@ -259,29 +288,47 @@ impl Section {
         Vec::new()
     }
 
-    fn check_relocate(&self, hash: &Hash) -> Option<Name> {
-        let candidates: Vec<_> = self.nodes
+    fn check_relocate(&self, _params: &Params, hash: &Hash) -> Option<Name> {
+        // Find the youngest node for which `hash % 2^age == 0`. If there is
+        // more than one, apply the tie-breaking rule.
+
+        // `hash % 2^age == 0` is equivalent to `hash.trailing_zeros() >= age`
+        // which is more efficient to compute.
+        let trailing_zeros = hash.trailing_zeros(); // + params.init_age;
+        let mut candidates: Vec<_> = self.nodes
             .values()
-            .filter(|node| hash.trailing_zeros() == node.age())
+            .filter(|node| node.age() <= trailing_zeros)
             .collect();
 
-        match candidates.len() {
-            0 | 1 => candidates.first().map(|node| node.name()),
-            _ => break_ties(candidates),
+        if candidates.is_empty() {
+            return None;
+        }
+
+        candidates.sort_by_key(|node| node.age());
+        let age = candidates[0].age();
+        let index = candidates
+            .iter()
+            .position(|node| node.age() > age)
+            .unwrap_or(candidates.len());
+        candidates.truncate(index);
+
+        if candidates.len() == 1 {
+            Some(candidates[0].name())
+        } else {
+            break_ties(candidates)
         }
     }
 
     fn relocate(&mut self, name: Name) -> Vec<Response> {
         if let Some(mut node) = self.nodes.remove(&name) {
-            node.set_name(random());
+            node.set_name(random::gen());
 
-            println!(
-                "{}: {} {} -> {}",
-                log::prefix(&self.prefix),
-                log::important("relocating"),
-                log::name(&name),
-                log::name(&node.name())
-            );
+            // println!(
+            //     "{}: relocating {} -> {}",
+            //     log::prefix(&self.prefix),
+            //     log::name(&name),
+            //     log::name(&node.name())
+            // );
 
             node.increment_age();
             if node.is_elder() {
@@ -327,31 +374,30 @@ impl Section {
     }
 
     fn add_node(&mut self, node: Node) {
-        println!(
-            "{}: added {}",
-            log::prefix(&self.prefix),
-            log::name(&node.name())
-        );
-
+        // println!(
+        //     "{}: added {}",
+        //     log::prefix(&self.prefix),
+        //     log::name(&node.name())
+        // );
         let _ = self.nodes.insert(node.name(), node);
     }
 
     fn reject_node(&self, node: Node) -> Vec<Response> {
-        println!(
-            "{}: rejected {}",
-            log::prefix(&self.prefix),
-            log::name(&node.name())
-        );
+        // println!(
+        //     "{}: rejected {}",
+        //     log::prefix(&self.prefix),
+        //     log::name(&node.name())
+        // );
         vec![Response::Reject(node)]
     }
 
-    fn remove_node(&mut self, name: Name) -> Option<Node> {
+    fn drop_node(&mut self, name: Name) -> Option<Node> {
         if let Some(node) = self.nodes.remove(&name) {
-            println!(
-                "{}: removed {}",
-                log::prefix(&self.prefix),
-                log::name(&name)
-            );
+            // println!(
+            //     "{}: dropped {}",
+            //     log::prefix(&self.prefix),
+            //     log::name(&name)
+            // );
             Some(node)
         } else {
             None
@@ -363,6 +409,13 @@ impl fmt::Debug for Section {
     fn fmt(&self, fmt: &mut fmt::Formatter) -> fmt::Result {
         write!(fmt, "Section({})", self.prefix)
     }
+}
+
+#[derive(Clone, Copy, Eq, PartialEq)]
+enum State {
+    Stable,
+    Splitting,
+    Merging(Prefix),
 }
 
 fn break_ties(mut nodes: Vec<&Node>) -> Option<Name> {
