@@ -69,6 +69,9 @@ fn main() {
     println!("\nSection size distribution:");
     print_dist(&network.section_size_dist());
 
+    println!("\nPrefix length distribution:");
+    print_dist(&network.prefix_len_dist());
+
     if let Some(path) = params.file {
         network.stats().write_to_file(path);
     }
@@ -213,16 +216,16 @@ where
         dist.keys().map(|k| u64::from(*k)).max().unwrap_or(0)
     );
 
-    let mut avg = 0u64;
-    let mut sum = 0u64;
+    let mut avg = 0f64;
+    let mut sum = 0f64;
     for (key, value) in dist {
-        let value = u64::from(*value);
+        let value = u64::from(*value) as f64;
 
         sum += value;
-        avg += value + u64::from(*key);
+        avg += value * u64::from(*key) as f64;
     }
 
-    let avg = avg as f64 / sum as f64;
+    let avg = avg / sum;
     println!("Avg: {:6.2}", avg)
 }
 

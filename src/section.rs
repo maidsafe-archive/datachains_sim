@@ -187,19 +187,8 @@ impl Section {
             );
         }
 
-        let num_adults0 = node::count_adults(
-            params,
-            self.nodes.values().filter(
-                |node| prefixes[0].matches(node.name()),
-            ),
-        );
-
-        let num_adults1 = node::count_adults(
-            params,
-            self.nodes.values().filter(
-                |node| prefixes[1].matches(node.name()),
-            ),
-        );
+        let num_adults0 = node::count_matching_adults(params, prefixes[0], self.nodes.values());
+        let num_adults1 = node::count_matching_adults(params, prefixes[1], self.nodes.values());
 
         let limit = 2 * params.group_size - params.quorum();
         if num_adults0 >= limit && num_adults1 >= limit {

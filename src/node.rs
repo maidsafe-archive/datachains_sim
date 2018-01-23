@@ -1,6 +1,6 @@
 use Age;
 use params::Params;
-use prefix::Name;
+use prefix::{Name, Prefix};
 use std::fmt;
 
 #[derive(Eq, PartialEq, Hash)]
@@ -79,6 +79,17 @@ pub fn count_infants<'a, I: IntoIterator<Item = &'a Node>>(params: &Params, node
     nodes
         .into_iter()
         .filter(|node| node.is_infant(params))
+        .count()
+}
+
+pub fn count_matching_adults<'a, I: IntoIterator<Item = &'a Node>>(
+    params: &Params,
+    prefix: Prefix,
+    nodes: I,
+) -> usize {
+    nodes
+        .into_iter()
+        .filter(|node| node.is_adult(params) && prefix.matches(node.name()))
         .count()
 }
 

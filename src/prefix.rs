@@ -35,7 +35,6 @@ pub struct Prefix {
 impl Prefix {
     pub const EMPTY: Self = Prefix { bits: 0, len: 0 };
 
-    #[allow(unused)]
     pub fn len(&self) -> u8 {
         self.len
     }

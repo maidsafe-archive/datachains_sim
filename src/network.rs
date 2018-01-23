@@ -83,6 +83,15 @@ impl Network {
         result
     }
 
+    pub fn prefix_len_dist(&self) -> BTreeMap<u8, u64> {
+        let mut result = BTreeMap::new();
+        for prefix in self.sections.keys() {
+            *result.entry(prefix.len()).or_insert(0) += 1;
+        }
+
+        result
+    }
+
     fn generate_random_messages(&mut self) {
         let mut adds = 0;
         let mut drops = 0;
@@ -212,11 +221,18 @@ impl Network {
             section.nodes().len() > self.params.max_section_size
         })
         {
-            // TODO: print more info
+            let prefixes = section.prefix().split();
+            let count0 =
+                node::count_matching_adults(&self.params, prefixes[0], section.nodes().values());
+            let count1 =
+                node::count_matching_adults(&self.params, prefixes[1], section.nodes().values());
+
             error!(
-                "{}: {}",
+                "{}: {} (adults per subsections: [..0]: {}, [..1]: {})",
                 log::prefix(&section.prefix()),
-                log::error("too many nodes")
+                log::error("too many nodes"),
+                count0,
+                count1,
             );
             false
         } else {
