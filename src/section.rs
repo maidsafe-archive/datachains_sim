@@ -157,6 +157,14 @@ impl Section {
     }
 
     fn handle_merge(&mut self, _params: &Params, parent: Prefix) -> Vec<Response> {
+        if let State::Merging(old_parent) = self.state {
+            if old_parent.is_ancestor(&parent) {
+                return Vec::new();
+            } else {
+                return vec![Response::Send(old_parent, Request::Merge(parent))];
+            }
+        }
+
         for node in self.nodes.values_mut() {
             node.increment_age();
             if node.is_elder() {
