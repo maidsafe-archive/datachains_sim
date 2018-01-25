@@ -6,7 +6,6 @@ use message::{Request, Response};
 use node::{self, Node};
 use params::{Params, RelocationStrategy};
 use prefix::{Name, Prefix};
-use random;
 use std::fmt;
 use std::mem;
 use std::u64;
@@ -352,15 +351,6 @@ impl Section {
 
     fn relocate(&mut self, name: Name) -> Vec<Response> {
         if let Some(mut node) = self.nodes.remove(&name) {
-            node.set_name(random::gen());
-
-            debug!(
-                "{}: relocating {} -> {}",
-                log::prefix(&self.prefix),
-                log::name(&name),
-                log::name(&node.name())
-            );
-
             node.increment_age();
             if node.is_elder() {
                 node.demote();

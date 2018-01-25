@@ -196,11 +196,34 @@ impl Network {
         stats
     }
 
-    fn handle_relocate(&mut self, node: Node) {
+    fn handle_relocate(&mut self, mut node: Node) {
+        let new_name = random::gen();
         if let Some(section) = self.sections.values_mut().find(|section| {
-            section.prefix().matches(node.name())
+            section.prefix().matches(new_name)
         })
         {
+            // Pick the new node name so it would fall into the subsection with
+            // fewer members, to keep the section balanced.
+            let prefixes = section.prefix().split();
+            let count0 =
+                node::count_matching_adults(&self.params, prefixes[0], section.nodes().values());
+            let count1 =
+                node::count_matching_adults(&self.params, prefixes[1], section.nodes().values());
+
+            let new_name = if count0 < count1 {
+                prefixes[0].substituted_in(new_name)
+            } else {
+                prefixes[1].substituted_in(new_name)
+            };
+
+            debug!(
+                "relocating {} -> {} to {}",
+                log::name(&node.name()),
+                log::name(&new_name),
+                log::prefix(&section.prefix()),
+            );
+
+            node.set_name(new_name);
             section.receive(Request::Live(node))
         } else {
             unreachable!()
