@@ -289,8 +289,8 @@ impl Section {
     }
 
     fn check_relocate(&self, params: &Params, hash: &Hash) -> Option<Name> {
-        // Find the youngest node for which `hash % 2^age == 0`. If there is
-        // more than one, apply the tie-breaking rule.
+        // Find the youngest or oldest node depending on the `RelocationStrategy` for which
+        // `hash % 2^age == 0`. If there is more than one, apply the tie-breaking rule.
 
         let mut candidates = self.relocation_candidates(params, hash);
         if candidates.is_empty() {
@@ -309,7 +309,7 @@ impl Section {
         let age = candidates[0].age();
         let index = candidates
             .iter()
-            .position(|node| node.age() > age)
+            .position(|node| node.age() != age)
             .unwrap_or(candidates.len());
         candidates.truncate(index);
 

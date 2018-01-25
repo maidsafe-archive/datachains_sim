@@ -34,6 +34,10 @@ use std::sync::atomic::{AtomicBool, Ordering};
 type Age = u64;
 
 fn main() {
+    if cfg!(windows) {
+        colored::control::set_override(false);
+    }
+
     let params = get_params();
 
     let seed = params.seed;
