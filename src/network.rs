@@ -135,10 +135,12 @@ impl Network {
         for response in responses.drain(..) {
             match response {
                 Response::Merge(section, old_prefix) => {
-                    stats.merges += 1;
                     self.sections
                         .entry(section.prefix())
-                        .or_insert_with(|| Section::new(section.prefix()))
+                        .or_insert_with(|| {
+                            stats.merges += 1;
+                            Section::new(section.prefix())
+                        })
                         .merge(&self.params, section);
                     let _ = self.sections.remove(&old_prefix);
                 }
