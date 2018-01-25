@@ -1,3 +1,4 @@
+extern crate byteorder;
 extern crate colored;
 extern crate clap;
 extern crate ctrlc;

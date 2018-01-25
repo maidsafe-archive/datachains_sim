@@ -1,10 +1,9 @@
 use Age;
+use byteorder::{ByteOrder, LittleEndian};
 use prefix::Name;
 use rand::{Rand, Rng};
 use std::fmt;
-use std::mem;
 use std::ops::Deref;
-use std::slice;
 use tiny_keccak::sha3_256;
 
 #[derive(Clone)]
@@ -49,12 +48,17 @@ pub struct Block {
 
 impl Block {
     pub fn hash(&self) -> Hash {
-        let slice = unsafe {
-            let ptr = self as *const _ as *const u8;
-            slice::from_raw_parts(ptr, mem::size_of::<Self>())
+        let mut bytes = [0; 17];
+        bytes[0] = match self.event {
+            Event::Live => 0,
+            Event::Dead => 1,
+            Event::Gone => 2,
         };
 
-        Hash(sha3_256(slice))
+        LittleEndian::write_u64(&mut bytes[1..], self.name.0);
+        LittleEndian::write_u64(&mut bytes[9..], self.age);
+
+        Hash(sha3_256(&bytes))
     }
 }
 
