@@ -1,50 +1,37 @@
 use Age;
 use prefix::Name;
 use rand::{Rand, Rng};
-use random;
 use std::fmt;
+use std::mem;
 use std::ops::Deref;
+use std::slice;
 use tiny_keccak::sha3_256;
 
 #[derive(Clone)]
 pub struct Chain {
-    // blocks: Vec<Block>,
+    last_live: Option<Block>,
 }
 
 impl Chain {
     pub fn new() -> Self {
-        // Chain { blocks: Vec::new() }
-        Chain {}
+        Chain { last_live: None }
     }
 
-    pub fn insert(&mut self, _event: Event, _name: Name, _age: Age) {
-        // self.blocks.push(Block { event, name, age });
-        // self.verify()
+    pub fn insert(&mut self, event: Event, name: Name, age: Age) {
+        if let Event::Live = event {
+            self.last_live = Some(Block { event, name, age })
+        }
     }
 
-    pub fn extend(&mut self, _other: Chain) {
-        // self.blocks.extend(other.blocks);
-        // self.verify()
+    pub fn extend(&mut self, other: Chain) {
+        if let Some(block) = other.last_live {
+            self.last_live = Some(block)
+        }
     }
 
     pub fn relocation_hash(&self, _name: Option<Name>) -> Option<Hash> {
-        Some(random::gen())
-        // name.and_then(|name| self.last_live_of(name))
-        //     .or_else(|| self.last_live())
-        //     .map(|block| block.hash())
+        self.last_live.as_ref().map(|block| block.hash())
     }
-
-    // fn last_live_of(&self, name: Name) -> Option<&Block> {
-    //     self.blocks.iter().rev().find(|block| {
-    //         block.event == Event::Live && block.name == name
-    //     })
-    // }
-
-    // fn last_live(&self) -> Option<&Block> {
-    //     self.blocks.iter().rev().find(
-    //         |block| block.event == Event::Live,
-    //     )
-    // }
 }
 
 impl fmt::Debug for Chain {
@@ -53,7 +40,6 @@ impl fmt::Debug for Chain {
     }
 }
 
-/*
 #[derive(Clone)]
 pub struct Block {
     event: Event,
@@ -71,7 +57,6 @@ impl Block {
         Hash(sha3_256(slice))
     }
 }
-*/
 
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]
 pub enum Event {
