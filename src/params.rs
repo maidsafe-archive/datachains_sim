@@ -30,6 +30,8 @@ pub struct Params {
     pub file: Option<String>,
     /// Log veribosity
     pub verbosity: usize,
+    /// Disable colored output
+    pub disable_colors: bool,
 }
 
 impl Params {

@@ -35,11 +35,11 @@ use std::sync::atomic::{AtomicBool, Ordering};
 type Age = u64;
 
 fn main() {
-    if cfg!(windows) {
+    let params = get_params();
+
+    if params.disable_colors || cfg!(windows) {
         colored::control::set_override(false);
     }
-
-    let params = get_params();
 
     let seed = params.seed;
     random::reseed(seed);
@@ -192,6 +192,12 @@ fn get_params() -> Params {
         .arg(Arg::with_name("VERBOSITY").short("v").multiple(true).help(
             "Log verbosity",
         ))
+        .arg(
+            Arg::with_name("DISABLE_COLORS")
+                .short("C")
+                .long("disable-colors")
+                .help("Disable colored output"),
+        )
         .get_matches();
 
     let seed = match matches.value_of("SEED") {
@@ -215,6 +221,7 @@ fn get_params() -> Params {
         stats_frequency: get_number(&matches, "STATS_FREQUENCY"),
         file: matches.value_of("FILE").map(String::from),
         verbosity: matches.occurrences_of("VERBOSITY") as usize + 1,
+        disable_colors: matches.is_present("DISABLE_COLORS"),
     }
 }
 

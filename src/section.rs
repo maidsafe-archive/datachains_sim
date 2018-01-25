@@ -155,7 +155,7 @@ impl Section {
         responses
     }
 
-    fn handle_merge(&mut self, _params: &Params, parent: Prefix) -> Vec<Response> {
+    fn handle_merge(&mut self, params: &Params, parent: Prefix) -> Vec<Response> {
         if let State::Merging(old_parent) = self.state {
             if old_parent.is_ancestor(&parent) {
                 return Vec::new();
@@ -163,6 +163,13 @@ impl Section {
                 return vec![Response::Send(old_parent, Request::Merge(parent))];
             }
         }
+
+        debug!(
+            "{}: merging {} adults into {}",
+            log::prefix(&self.prefix),
+            node::count_adults(params, self.nodes.values()),
+            log::prefix(&parent),
+        );
 
         for node in self.nodes.values_mut() {
             node.increment_age();
