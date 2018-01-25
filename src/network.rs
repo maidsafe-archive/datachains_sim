@@ -47,7 +47,8 @@ impl Network {
             stats.rejections,
         );
 
-        self.check_section_sizes()
+        let _ = self.check_section_sizes();
+        true
     }
 
     pub fn stats(&self) -> &Stats {
@@ -146,8 +147,21 @@ impl Network {
                 }
                 Response::Split(section0, section1, old_prefix) => {
                     stats.splits += 1;
-                    assert!(self.sections.insert(section0.prefix(), section0).is_none());
-                    assert!(self.sections.insert(section1.prefix(), section1).is_none());
+
+                    let prefix0 = section0.prefix();
+                    let prefix1 = section1.prefix();
+
+                    assert!(
+                        self.sections.insert(prefix0, section0).is_none(),
+                        "section with prefix [{}] already exists",
+                        prefix0
+                    );
+                    assert!(
+                        self.sections.insert(prefix1, section1).is_none(),
+                        "section with prefix [{}] already exists",
+                        prefix1
+                    );
+
                     let _ = self.sections.remove(&old_prefix);
                 }
                 Response::Reject(_) => {

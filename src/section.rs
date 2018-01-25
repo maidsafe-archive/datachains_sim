@@ -156,12 +156,30 @@ impl Section {
     }
 
     fn handle_merge(&mut self, params: &Params, parent: Prefix) -> Vec<Response> {
-        if let State::Merging(old_parent) = self.state {
-            if old_parent.is_ancestor(&parent) {
-                return Vec::new();
-            } else {
-                return vec![Response::Send(old_parent, Request::Merge(parent))];
+        match self.state {
+            State::Merging(old_parent) => {
+                if old_parent.is_ancestor(&parent) {
+                    return Vec::new();
+                } else {
+                    return vec![Response::Send(old_parent, Request::Merge(parent))];
+                }
             }
+            State::Splitting => {
+                let prefixes = self.prefix.split();
+
+                debug!(
+                    "{}: split in progress. Forwarding request to {}, {}",
+                    log::prefix(&self.prefix),
+                    log::prefix(&prefixes[0]),
+                    log::prefix(&prefixes[1])
+                );
+
+                return vec![
+                    Response::Send(prefixes[0], Request::Merge(parent)),
+                    Response::Send(prefixes[1], Request::Merge(parent)),
+                ];
+            }
+            _ => (),
         }
 
         debug!(
