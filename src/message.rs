@@ -27,8 +27,4 @@ pub enum Response {
     Relocate(Node),
     /// Send a request to the section with the given prefix.
     Send(Prefix, Request),
-    /// Node has been added (used only for recording statistics)
-    Add,
-    /// Node has been dropped (used only for recording statistics)
-    Drop,
 }

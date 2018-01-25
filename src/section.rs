@@ -124,35 +124,31 @@ impl Section {
         self.add_node(node);
         self.update_elders(params);
 
-        let mut responses = vec![Response::Add];
-
-        let split_responses = self.try_split(params);
-        if !split_responses.is_empty() {
-            responses.extend(split_responses)
+        let responses = self.try_split(params);
+        if !responses.is_empty() {
+            responses
         } else if is_adult {
-            responses.extend(self.try_relocate(params, Some(name)))
+            self.try_relocate(params, Some(name))
+        } else {
+            Vec::new()
         }
-
-        responses
     }
 
     fn handle_dead(&mut self, params: &Params, name: Name) -> Vec<Response> {
-        let mut responses = Vec::with_capacity(1);
-
         if let Some(node) = self.drop_node(name) {
             self.update_elders(params);
 
-            responses.push(Response::Drop);
-
-            let merge_responses = self.try_merge(params);
-            if !merge_responses.is_empty() {
-                responses.extend(merge_responses);
+            let responses = self.try_merge(params);
+            if !responses.is_empty() {
+                responses
             } else if node.is_adult(params) {
-                responses.extend(self.try_relocate(params, None));
+                self.try_relocate(params, None)
+            } else {
+                Vec::new()
             }
+        } else {
+            Vec::new()
         }
-
-        responses
     }
 
     fn handle_merge(&mut self, params: &Params, parent: Prefix) -> Vec<Response> {

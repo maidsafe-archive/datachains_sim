@@ -13,7 +13,6 @@ pub struct Network {
     params: Params,
     stats: Stats,
     sections: HashMap<Prefix, Section>,
-    num_nodes: u64,
 }
 
 impl Network {
@@ -26,7 +25,6 @@ impl Network {
             params,
             stats: Stats::new(),
             sections,
-            num_nodes: 0,
         }
     }
 
@@ -39,7 +37,10 @@ impl Network {
 
         self.stats.record(
             iterations,
-            self.num_nodes,
+            self.sections
+                .values()
+                .map(|section| section.nodes().len() as u64)
+                .sum(),
             self.sections.len() as u64,
             stats.merges,
             stats.splits,
@@ -197,12 +198,6 @@ impl Network {
                             }
                         }
                     }
-                }
-                Response::Add => {
-                    self.num_nodes += 1;
-                }
-                Response::Drop => {
-                    self.num_nodes -= 1;
                 }
             }
         }
