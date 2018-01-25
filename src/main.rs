@@ -24,6 +24,7 @@ use colored::Colorize;
 use network::Network;
 use params::{Params, RelocationStrategy};
 use random::Seed;
+use std::cmp;
 use std::collections;
 use std::collections::hash_map::DefaultHasher;
 use std::hash::BuildHasherDefault;
@@ -61,6 +62,7 @@ fn main() {
     }
 
     let mut network = Network::new(params.clone());
+    let mut max_prefix_len_diff = 0;
 
     for i in 0..params.num_iterations {
         info!(
@@ -71,7 +73,7 @@ fn main() {
         let result = network.tick(i);
 
         if params.stats_frequency > 0 && i % params.stats_frequency == 0 {
-            print_tick_stats(&network);
+            print_tick_stats(&network, &mut max_prefix_len_diff);
         }
 
         if !result || !running.load(Ordering::Relaxed) {
@@ -225,13 +227,20 @@ fn get_params() -> Params {
     }
 }
 
-fn print_tick_stats(network: &Network) {
+fn print_tick_stats(network: &Network, max_prefix_len_diff: &mut u64) {
+    let prefix_len_dist = network.prefix_len_dist();
+    *max_prefix_len_diff = cmp::max(
+        *max_prefix_len_diff,
+        prefix_len_dist.max - prefix_len_dist.min,
+    );
+
     println!(
-        "Header {:?}, AgeDist {:?}, SectionSizeDist {:?}, PrefixLenDist {:?}",
+        "Header {:?}, AgeDist {:?}, SectionSizeDist {:?}, PrefixLenDist {:?}, MaxPrefixLenDiff: {}",
         network.stats().summary(),
         network.age_dist(),
         network.section_size_dist(),
-        network.prefix_len_dist(),
+        prefix_len_dist,
+        max_prefix_len_diff,
     )
 }
 

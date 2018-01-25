@@ -256,9 +256,10 @@ impl Network {
                 node::count_matching_adults(&self.params, prefixes[1], section.nodes().values());
 
             error!(
-                "{}: {} (adults per subsections: [..0]: {}, [..1]: {})",
+                "{}: {}: {} (adults per subsections: [..0]: {}, [..1]: {})",
                 log::prefix(&section.prefix()),
                 log::error("too many nodes"),
+                section.nodes().len(),
                 count0,
                 count1,
             );

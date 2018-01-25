@@ -6,9 +6,9 @@ use std::path::Path;
 use std::u64;
 
 pub struct Distribution {
-    min: u64,
-    max: u64,
-    avg: f64,
+    pub min: u64,
+    pub max: u64,
+    pub avg: f64,
 }
 
 impl Distribution {
