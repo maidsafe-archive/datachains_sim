@@ -1,6 +1,6 @@
 use HashMap;
 use HashSet;
-use chain::{Chain, Event, Hash};
+use chain::{Block, Chain, Event, Hash};
 use log;
 use message::{Request, Response};
 use node::{self, Node};
@@ -119,6 +119,7 @@ impl Section {
             return self.reject_node(node);
         }
 
+        let age = node.age();
         let name = node.name();
         let is_adult = node.is_adult(params);
 
@@ -129,7 +130,7 @@ impl Section {
         if !responses.is_empty() {
             responses
         } else if is_adult {
-            self.try_relocate(params, Some(name))
+            self.try_relocate(params, Some(Block::new(Event::Live, name, age)))
         } else {
             Vec::new()
         }
@@ -280,15 +281,19 @@ impl Section {
         ]
     }
 
-    fn try_relocate(&mut self, params: &Params, live_name: Option<Name>) -> Vec<Response> {
+    fn try_relocate(&mut self, params: &Params, live_block: Option<Block>) -> Vec<Response> {
         // If the relocation would trigger merge, don't relocate.
         if node::count_adults(params, self.nodes.values()) <= params.group_size {
             return Vec::new();
         }
 
-        let mut hash = self.chain.relocation_hash(live_name).expect(
-            "no Live block in the chain",
-        );
+        let mut hash = if let Some(block) = live_block {
+            block.hash()
+        } else {
+            self.chain.relocation_hash().expect(
+                "no Live block in the chain",
+            )
+        };
 
         for _ in 0..params.max_relocation_attempts {
             if let Some(name) = self.check_relocate(params, &hash) {

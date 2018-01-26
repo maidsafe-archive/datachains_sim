@@ -28,7 +28,7 @@ impl Chain {
         }
     }
 
-    pub fn relocation_hash(&self, _name: Option<Name>) -> Option<Hash> {
+    pub fn relocation_hash(&self) -> Option<Hash> {
         self.last_live.as_ref().map(|block| block.hash())
     }
 }
@@ -47,6 +47,10 @@ pub struct Block {
 }
 
 impl Block {
+    pub fn new(event: Event, name: Name, age: Age) -> Self {
+        Block { event, name, age }
+    }
+
     pub fn hash(&self) -> Hash {
         let mut bytes = [0; 17];
         bytes[0] = match self.event {
