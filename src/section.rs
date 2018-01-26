@@ -37,6 +37,7 @@ impl Section {
         &self.nodes
     }
 
+    #[allow(unused)]
     pub fn is_complete(&self, params: &Params) -> bool {
         node::count_adults(params, self.nodes.values()) >= params.group_size
     }
@@ -185,14 +186,6 @@ impl Section {
             log::prefix(&parent),
         );
 
-        for node in self.nodes.values_mut() {
-            node.increment_age();
-            if node.is_elder() {
-                node.demote();
-                self.chain.insert(Event::Gone, node.name(), node.age());
-            }
-        }
-
         let mut section = Section::new(parent);
         section.chain = self.chain.clone();
         section.nodes = mem::replace(&mut self.nodes, HashMap::default());
@@ -226,14 +219,6 @@ impl Section {
                 log::prefix(&prefixes[0]),
                 log::prefix(&prefixes[1])
             );
-
-            for node in self.nodes.values_mut() {
-                node.increment_age();
-                if node.is_elder() {
-                    node.demote();
-                    self.chain.insert(Event::Gone, node.name(), node.age());
-                }
-            }
 
             let mut section0 = Section::new(prefixes[0]);
             let mut section1 = Section::new(prefixes[1]);
