@@ -23,10 +23,6 @@ impl Node {
         self.name
     }
 
-    pub fn set_name(&mut self, name: Name) {
-        self.name = name
-    }
-
     pub fn age(&self) -> Age {
         self.age
     }

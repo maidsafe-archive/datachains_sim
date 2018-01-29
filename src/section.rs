@@ -6,6 +6,8 @@ use message::{Request, Response};
 use node::{self, Node};
 use params::{Params, RelocationStrategy};
 use prefix::{Name, Prefix};
+use random;
+use std::collections::BTreeSet;
 use std::fmt;
 use std::mem;
 use std::u64;
@@ -16,6 +18,8 @@ pub struct Section {
     nodes: HashMap<Name, Node>,
     chain: Chain,
     requests: Vec<Request>,
+    relocating_in_nodes: BTreeSet<Name>,
+    relocating_out_nodes: BTreeSet<Name>,
 }
 
 impl Section {
@@ -26,6 +30,8 @@ impl Section {
             nodes: HashMap::default(),
             chain: Chain::new(),
             requests: Vec::new(),
+            relocating_in_nodes: BTreeSet::new(),
+            relocating_out_nodes: BTreeSet::new(),
         }
     }
 
@@ -60,6 +66,16 @@ impl Section {
                 Request::Live(node) => self.handle_live(params, node),
                 Request::Dead(name) => self.handle_dead(params, name),
                 Request::Merge(prefix) => self.handle_merge(params, prefix),
+                Request::RelocateRequest(src, name, node_name) => {
+                    self.handle_relocate_request(params, src, name, node_name)
+                }
+                Request::RelocateAccept(dst, node_name) => {
+                    self.handle_relocate_accept(dst, node_name)
+                }
+                Request::Relocate(node) => self.handle_relocate(params, node),
+                Request::RelocateReject(target, node_name) => {
+                    self.handle_relocate_reject(target, node_name)
+                }
             })
         }
 
@@ -71,7 +87,8 @@ impl Section {
         self.chain.extend(other.chain);
         self.nodes.extend(other.nodes);
         self.requests.extend(other.requests);
-        self.update_elders(params);
+        self.relocating_out_nodes.clear();
+        let _ = self.update_elders(params, false);
     }
 
     /// Handle new node attempt to join us.
@@ -106,48 +123,44 @@ impl Section {
             }
         }
 
-        if self.prefix == Prefix::EMPTY {
-            // If we are the root section (our prefix is empty), bump everyone's
-            // (except the new node) age by one.
-            for node in self.nodes.values_mut() {
-                node.increment_age()
-            }
+        // During startup, nodes joining as adult (age of 5), and no relocation.
+        let startup = self.prefix == Prefix::EMPTY;
+
+        let new_node = if startup {
+            Node::new(node.name(), params.adult_age)
         } else if node.is_infant(params) &&
                    node::count_infants(params, self.nodes.values()) >=
                        params.max_infants_per_section
         {
             return self.reject_node(node);
-        }
+        } else {
+            node
+        };
 
-        let age = node.age();
-        let name = node.name();
-        let is_adult = node.is_adult(params);
+        let age = new_node.age();
+        let name = new_node.name();
+        let is_adult = new_node.is_adult(params);
 
-        self.add_node(node);
-        self.update_elders(params);
+        self.add_node(new_node);
+        // A relocated adult shall only trigger relocate once.
+        // It's promotion shall not trigger relocation.
+        let _ = self.update_elders(params, false);
 
         let responses = self.try_split(params);
         if !responses.is_empty() {
             responses
-        } else if is_adult {
-            self.try_relocate(params, Some(Block::new(Event::Live, name, age)))
+        } else if is_adult && !startup {
+            self.try_relocate(params, Block::new(Event::Live, name, age))
         } else {
             Vec::new()
         }
     }
 
     fn handle_dead(&mut self, params: &Params, name: Name) -> Vec<Response> {
-        if let Some(node) = self.drop_node(name) {
-            self.update_elders(params);
-
-            let responses = self.try_merge(params);
-            if !responses.is_empty() {
-                responses
-            } else if node.is_adult(params) {
-                self.try_relocate(params, None)
-            } else {
-                Vec::new()
-            }
+        if let Some(_node) = self.drop_node(name) {
+            let mut responses = self.update_elders(params, true);
+            responses.extend(self.try_merge(params));
+            responses
         } else {
             Vec::new()
         }
@@ -196,6 +209,77 @@ impl Section {
         vec![Response::Merge(section, self.prefix)]
     }
 
+    fn handle_relocate(&mut self, params: &Params, node: Node) -> Vec<Response> {
+        if !self.relocating_in_nodes.remove(&node.name()) {
+            return Vec::new();
+        }
+        let new_name = random::gen();
+
+        // Pick the new node name so it would fall into the subsection with
+        // fewer members, to keep the section balanced.
+        let prefixes = self.prefix.split();
+        let count0 = node::count_matching_adults(params, prefixes[0], self.nodes.values());
+        let count1 = node::count_matching_adults(params, prefixes[1], self.nodes.values());
+
+        let new_name = if count0 < count1 {
+            prefixes[0].substituted_in(new_name)
+        } else {
+            prefixes[1].substituted_in(new_name)
+        };
+
+        debug!(
+            "relocating {} -> {} to {}",
+            log::name(&node.name()),
+            log::name(&new_name),
+            log::prefix(&self.prefix),
+        );
+
+        self.handle_live(params, Node::new(new_name, node.age()))
+    }
+
+    fn handle_relocate_accept(&mut self, dst: Prefix, node_name: Name) -> Vec<Response> {
+        if self.relocating_out_nodes.remove(&node_name) {
+            if let Some(mut node) = self.nodes.remove(&node_name) {
+                node.increment_age();
+                if node.is_elder() {
+                    node.demote();
+                    self.chain.insert(Event::Dead, node_name, node.age());
+                }
+
+                return vec![Response::Send(dst, Request::Relocate(node))];
+            }
+        }
+        Vec::new()
+    }
+
+    fn handle_relocate_reject(&self, _target: Name, node_name: Name) -> Vec<Response> {
+        if self.relocating_out_nodes.contains(&node_name) {
+            let dst: Name = random::gen();
+            vec![Response::RelocateRequest(self.prefix, dst, node_name)]
+        } else {
+            Vec::new()
+        }
+    }
+
+    fn handle_relocate_request(
+        &mut self,
+        params: &Params,
+        src: Prefix,
+        target: Name,
+        node_name: Name,
+    ) -> Vec<Response> {
+        if !self.relocating_in_nodes.is_empty() || self.nodes.len() >= params.max_section_size {
+            vec![
+                Response::Send(src, Request::RelocateReject(target, node_name)),
+            ]
+        } else {
+            let _ = self.relocating_in_nodes.insert(node_name);
+            vec![
+                Response::Send(src, Request::RelocateAccept(self.prefix, node_name)),
+            ]
+        }
+    }
+
     fn try_split(&mut self, params: &Params) -> Vec<Response> {
         // We can only split if both section post-split would remain with at least
         // 2 * GROUP_SIZE - QUORUM adults.
@@ -241,10 +325,10 @@ impl Section {
             );
 
             section0.nodes = nodes0;
-            section0.update_elders(params);
+            let _ = section0.update_elders(params, false);
 
             section1.nodes = nodes1;
-            section1.update_elders(params);
+            let _ = section1.update_elders(params, false);
 
             self.state = State::Splitting;
 
@@ -281,23 +365,23 @@ impl Section {
         ]
     }
 
-    fn try_relocate(&mut self, params: &Params, live_block: Option<Block>) -> Vec<Response> {
+    fn try_relocate(&mut self, params: &Params, live_block: Block) -> Vec<Response> {
         // If the relocation would trigger merge, don't relocate.
         if node::count_adults(params, self.nodes.values()) <= params.group_size {
             return Vec::new();
         }
+        // When there is alread node waiting for relocation, don't relocate.
+        if !self.relocating_out_nodes.is_empty() {
+            return Vec::new();
+        }
 
-        let mut hash = if let Some(block) = live_block {
-            block.hash()
-        } else {
-            self.chain.relocation_hash().expect(
-                "no Live block in the chain",
-            )
-        };
+        let mut hash = live_block.hash();
 
         for _ in 0..params.max_relocation_attempts {
             if let Some(name) = self.check_relocate(params, &hash) {
-                return self.relocate(name);
+                let _ = self.relocating_out_nodes.insert(name);
+                let target: Name = random::gen();
+                return vec![Response::RelocateRequest(self.prefix, target, name)];
             } else {
                 hash = hash.hash();
             }
@@ -360,21 +444,7 @@ impl Section {
             .collect()
     }
 
-    fn relocate(&mut self, name: Name) -> Vec<Response> {
-        if let Some(mut node) = self.nodes.remove(&name) {
-            node.increment_age();
-            if node.is_elder() {
-                node.demote();
-                self.chain.insert(Event::Dead, name, node.age());
-            }
-
-            vec![Response::Relocate(node)]
-        } else {
-            Vec::new()
-        }
-    }
-
-    fn update_elders(&mut self, params: &Params) {
+    fn update_elders(&mut self, params: &Params, relocate: bool) -> Vec<Response> {
         let old: HashSet<_> = self.nodes
             .values()
             .filter(|node| node.is_elder())
@@ -389,6 +459,7 @@ impl Section {
                 .collect()
         };
 
+        let mut promoted_nodes = vec![];
         for node in self.nodes.values_mut() {
             let old = old.contains(&node.name());
             let new = new.contains(&node.name());
@@ -401,7 +472,15 @@ impl Section {
             if new && !old {
                 node.promote();
                 self.chain.insert(Event::Live, node.name(), node.age());
+                promoted_nodes.push(Node::new(node.name(), node.age()));
             }
+        }
+
+        if relocate && promoted_nodes.len() == 1 {
+            let node = promoted_nodes.first().unwrap();
+            self.try_relocate(params, Block::new(Event::Live, node.name(), node.age()))
+        } else {
+            Vec::new()
         }
     }
 
