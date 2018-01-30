@@ -262,9 +262,9 @@ impl Section {
         Vec::new()
     }
 
-    fn handle_relocate_reject(&self, _target: Name, node_name: Name) -> Vec<Response> {
+    fn handle_relocate_reject(&self, target: Name, node_name: Name) -> Vec<Response> {
         if self.relocating_out_nodes.contains(&node_name) {
-            let dst: Name = random::gen();
+            let dst = Name(Hash::new_from_u64(target.0).hash().to_u64());
             vec![Response::RelocateRequest(self.prefix, dst, node_name)]
         } else {
             Vec::new()
@@ -390,7 +390,7 @@ impl Section {
         for _ in 0..params.max_relocation_attempts {
             if let Some(name) = self.check_relocate(params, &hash) {
                 let _ = self.relocating_out_nodes.insert(name);
-                let target: Name = random::gen();
+                let target = Name(hash.to_u64());
                 return vec![Response::RelocateRequest(self.prefix, target, name)];
             } else {
                 hash = hash.hash();
