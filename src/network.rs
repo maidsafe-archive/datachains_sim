@@ -229,8 +229,6 @@ impl Network {
         stats
     }
 
-
-
     fn check_section_sizes(&self) -> bool {
         if let Some(section) = self.sections.values().find(|section| {
             section.nodes().len() > self.params.max_section_size

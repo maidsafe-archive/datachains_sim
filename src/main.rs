@@ -22,7 +22,7 @@ mod stats;
 use clap::{App, Arg, ArgMatches};
 use colored::Colorize;
 use network::Network;
-use params::{Params, RelocationStrategy};
+use params::Params;
 use random::Seed;
 use std::cmp;
 use std::collections;
@@ -165,16 +165,6 @@ fn get_params() -> Params {
                 .default_value("1"),
         )
         .arg(
-            Arg::with_name("RELOCATION_STRATEGY")
-                .short("R")
-                .long("relocation-strategy")
-                .help("Relocation strategy (o = oldest first, y = youngest first)")
-                .takes_value(true)
-                .possible_values(&["o", "y"])
-                .hide_possible_values(true)
-                .default_value("o"),
-        )
-        .arg(
             Arg::with_name("STATS_FREQUENCY")
                 .short("F")
                 .long("stats-frequency")
@@ -207,9 +197,6 @@ fn get_params() -> Params {
         None => Seed::random(),
     };
 
-    let relocation_strategy =
-        RelocationStrategy::from_str(matches.value_of("RELOCATION_STRATEGY").unwrap()).unwrap();
-
     Params {
         seed,
         num_iterations: get_number(&matches, "ITERATIONS"),
@@ -219,7 +206,6 @@ fn get_params() -> Params {
         max_section_size: get_number(&matches, "MAX_SECTION_SIZE"),
         max_relocation_attempts: get_number(&matches, "MAX_RELOCATION_ATTEMPTS"),
         max_infants_per_section: get_number(&matches, "MAX_INFANTS_PER_SECTION"),
-        relocation_strategy,
         stats_frequency: get_number(&matches, "STATS_FREQUENCY"),
         file: matches.value_of("FILE").map(String::from),
         verbosity: matches.occurrences_of("VERBOSITY") as usize + 1,
