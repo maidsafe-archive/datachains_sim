@@ -49,6 +49,10 @@ impl Network {
         );
 
         let _ = self.check_section_sizes();
+        // Simulating time out of relocating cache
+        for section in self.sections.values_mut() {
+            section.clear_relocating_cache();
+        }
         true
     }
 

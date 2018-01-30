@@ -52,6 +52,11 @@ impl Section {
         self.requests.push(request)
     }
 
+    pub fn clear_relocating_cache(&mut self) {
+        self.relocating_out_nodes.clear();
+        self.relocating_in_nodes.clear();
+    }
+
     pub fn handle_requests(&mut self, params: &Params) -> Vec<Response> {
         let mut responses = Vec::new();
 
