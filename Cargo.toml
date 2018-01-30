@@ -1,12 +1,12 @@
 [package]
 name = "ageing_sim"
-version = "0.1.0"
-authors = ["Bartłomiej Kamiński <fizyk20@gmail.com>"]
+version = "0.2.0"
+authors = ["MaidSafe Developers <dev@maidsafe.net>"]
 
 [dependencies]
+clap = "2.29.2"
+colored = "1.6"
+ctrlc = "3.1"
 rand = "0.3"
-serde = "1.0"
-serde_derive = "1.0"
-serde_json = "1.0"
 tiny-keccak = "1.4"
-clap = "2.29"
+byteorder = "1.2"
