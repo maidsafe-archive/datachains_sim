@@ -28,9 +28,8 @@ impl Chain {
         }
     }
 
-    #[allow(unused)]
-    pub fn relocation_hash(&self) -> Option<Hash> {
-        self.last_live.as_ref().map(|block| block.hash())
+    pub fn last_live(&self) -> Option<Block> {
+        self.last_live.clone()
     }
 }
 

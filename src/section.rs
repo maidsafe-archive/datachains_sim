@@ -162,9 +162,14 @@ impl Section {
     }
 
     fn handle_dead(&mut self, params: &Params, name: Name) -> Vec<Response> {
-        if let Some(_node) = self.drop_node(name) {
+        if let Some(node) = self.drop_node(name) {
             let mut responses = self.update_elders(params, true);
             responses.extend(self.try_merge(params));
+            if node.is_adult(params) {
+                if let Some(last_live) = self.chain.last_live() {
+                    responses.extend(self.try_relocate(params, last_live));
+                }
+            }
             responses
         } else {
             Vec::new()
