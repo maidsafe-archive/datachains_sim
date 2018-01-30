@@ -1,46 +1,38 @@
-use std::str::FromStr;
+//! Simulation parameters.
 
-#[derive(Clone, Copy, Debug)]
-pub enum Strategy {
-    Always,
-    Complete,
-}
-
-impl FromStr for Strategy {
-    type Err = ();
-    fn from_str(s: &str) -> Result<Self, ()> {
-        match s {
-            "always" => Ok(Strategy::Always),
-            "complete" => Ok(Strategy::Complete),
-            _ => Err(()),
-        }
-    }
-}
-
-#[derive(Clone, Copy, Debug)]
-pub enum DropDist {
-    Exponential,
-    RevProp,
-}
-
-impl FromStr for DropDist {
-    type Err = ();
-    fn from_str(s: &str) -> Result<Self, ()> {
-        match s {
-            "exp" | "exponential" => Ok(DropDist::Exponential),
-            "rev" | "reverse-proportional" => Ok(DropDist::RevProp),
-            _ => Err(()),
-        }
-    }
-}
+use random::Seed;
 
 #[derive(Clone, Debug)]
 pub struct Params {
-    pub init_age: u8,
-    pub split_strategy: Strategy,
-    pub norejectyoung: bool,
-    pub growth: (u8, u8),
-    pub structure_output_file: Option<String>,
-    pub drop_dist: DropDist,
-    pub inc_age: bool,
+    /// Seed for the random number generator.
+    pub seed: Seed,
+    /// Number of simulation iterations.
+    pub num_iterations: u64,
+    /// Number of nodes to form a complete group.
+    pub group_size: usize,
+    /// Age of newly joined node.
+    pub init_age: u64,
+    /// Age at which a node becomes adult.
+    pub adult_age: u64,
+    /// Maximum number of nodes a section can have before the simulation fails.
+    pub max_section_size: usize,
+    /// Maximum number of reocation attempts after a `Live` event.
+    pub max_relocation_attempts: usize,
+    /// Maximum number of infants allowed in one section.
+    pub max_infants_per_section: usize,
+    /// Print statistics every Nth iteration (supress if 0)
+    pub stats_frequency: u64,
+    /// File to store  network structure data.
+    pub file: Option<String>,
+    /// Log veribosity
+    pub verbosity: usize,
+    /// Disable colored output
+    pub disable_colors: bool,
+}
+
+impl Params {
+    /// Quorum size - a simple majority of the group.
+    pub fn quorum(&self) -> usize {
+        self.group_size / 2 + 1
+    }
 }
