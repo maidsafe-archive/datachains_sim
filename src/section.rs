@@ -17,7 +17,7 @@ pub struct Section {
     nodes: HashMap<Name, Node>,
     chain: Chain,
     requests: Vec<Request>,
-    incoming_relocations: HashSet<Name>,
+    incoming_relocations: HashMap<Name, Name>,
     outgoing_relocations: HashSet<Name>,
 }
 
@@ -29,7 +29,7 @@ impl Section {
             nodes: HashMap::default(),
             chain: Chain::new(),
             requests: Vec::new(),
-            incoming_relocations: HashSet::default(),
+            incoming_relocations: HashMap::default(),
             outgoing_relocations: HashSet::default(),
         }
     }
@@ -92,7 +92,8 @@ impl Section {
         self.chain.extend(other.chain);
         self.nodes.extend(other.nodes);
         self.requests.extend(other.requests);
-        self.outgoing_relocations.clear();
+        self.incoming_relocations.extend(other.incoming_relocations);
+        self.outgoing_relocations.extend(other.outgoing_relocations);
         let _ = self.update_elders(params, false);
     }
 
@@ -195,10 +196,10 @@ impl Section {
 
     fn handle_relocate(&mut self, params: &Params, node: Node) -> Vec<Response> {
         if let Some(prefix) = self.forward(node.name()) {
-            return vec![Response::Send(prefix, Request::Live(node))];
+            return vec![Response::Send(prefix, Request::Relocate(node))];
         }
 
-        if !self.incoming_relocations.remove(&node.name()) {
+        if self.incoming_relocations.remove(&node.name()).is_none() {
             return Vec::new();
         }
 
@@ -238,7 +239,7 @@ impl Section {
                 Response::Send(src, Request::RelocateReject { dst, node_name }),
             ]
         } else {
-            let _ = self.incoming_relocations.insert(node_name);
+            let _ = self.incoming_relocations.insert(node_name, dst);
             vec![
                 Response::Send(src, Request::RelocateAccept { dst, node_name }),
             ]
@@ -307,17 +308,12 @@ impl Section {
             section0.chain = self.chain.clone();
             section1.chain = self.chain.clone();
 
-            let (nodes0, nodes1) = self.nodes.drain().partition(
-                |&(name, _)| if prefixes[0].matches(
-                    name,
-                )
-                {
-                    true
-                } else if prefixes[1].matches(name) {
-                    false
-                } else {
-                    unreachable!()
-                },
+            // Nodes
+            let (nodes0, nodes1) = split(
+                self.nodes.drain(),
+                prefixes[0],
+                prefixes[1],
+                |&(name, _)| name,
             );
 
             section0.nodes = nodes0;
@@ -325,6 +321,28 @@ impl Section {
 
             section1.nodes = nodes1;
             let _ = section1.update_elders(params, false);
+
+            // Outgoing relocations
+            let (nodes0, nodes1) = split(
+                self.outgoing_relocations.drain(),
+                prefixes[0],
+                prefixes[1],
+                |&name| name,
+            );
+
+            section0.outgoing_relocations = nodes0;
+            section1.outgoing_relocations = nodes1;
+
+            // Incoming relocations
+            let (nodes0, nodes1) = split(
+                self.incoming_relocations.drain(),
+                prefixes[0],
+                prefixes[1],
+                |&(_, dst)| dst,
+            );
+
+            section0.incoming_relocations = nodes0;
+            section1.incoming_relocations = nodes1;
 
             self.state = State::Splitting;
 
@@ -560,4 +578,22 @@ fn break_ties(mut nodes: Vec<&Node>) -> Option<Name> {
     let total = nodes.iter().fold(0, |total, node| total ^ node.name().0);
     nodes.sort_by_key(|node| node.name().0 ^ total);
     nodes.first().map(|node| node.name())
+}
+
+fn split<S, T, F>(nodes: S, prefix0: Prefix, prefix1: Prefix, mut name: F) -> (T, T)
+where
+    S: IntoIterator,
+    T: Default + Extend<S::Item>,
+    F: FnMut(&S::Item) -> Name,
+{
+    nodes.into_iter().partition(|node| {
+        let name = name(node);
+        if prefix0.matches(name) {
+            true
+        } else if prefix1.matches(name) {
+            false
+        } else {
+            unreachable!()
+        }
+    })
 }
