@@ -3,7 +3,7 @@ use log;
 use message::{Request, Response};
 use node::{self, Node};
 use params::Params;
-use prefix::Prefix;
+use prefix::{Name, Prefix};
 use random;
 use section::Section;
 use stats::{Distribution, Stats};
@@ -49,10 +49,7 @@ impl Network {
         );
 
         let _ = self.check_section_sizes();
-        // Simulating time out of relocating cache
-        for section in self.sections.values_mut() {
-            section.clear_relocating_cache();
-        }
+
         true
     }
 
@@ -92,6 +89,10 @@ impl Network {
         let mut drops = 0;
 
         for section in self.sections.values_mut() {
+            if section.has_incoming_relocation() {
+                continue;
+            }
+
             if random::gen() {
                 add_random_node(&self.params, section);
                 adds += 1;
@@ -172,15 +173,22 @@ impl Network {
                 Response::Reject(_) => {
                     stats.rejections += 1;
                 }
-                Response::RelocateRequest(src, name, node) => {
-                    if let Some(section) = self.sections.values_mut().find(|section| {
-                        section.prefix().matches(name)
+                Response::RelocateRequest {
+                    src,
+                    dst,
+                    node_name,
+                } => {
+                    let section = self.find_matching_section(dst);
+                    section.receive(Request::RelocateRequest {
+                        src,
+                        dst,
+                        node_name,
                     })
-                    {
-                        section.receive(Request::RelocateRequest(src, name, node))
-                    } else {
-                        unreachable!()
-                    }
+                }
+                Response::Relocate { dst, node } => {
+                    stats.relocations += 1;
+                    let section = self.find_matching_section(dst);
+                    section.receive(Request::Relocate(node))
                 }
                 Response::Send(prefix, request) => {
                     match request {
@@ -197,36 +205,40 @@ impl Network {
                         }
                         Request::Relocate(node) => {
                             stats.relocations += 1;
-                            if let Some(section) = self.sections.get_mut(&prefix) {
-                                section.receive(Request::Relocate(node))
-                            } else {
-                                println!(
-                                    "{} {} {} for Request::Relocate",
-                                    log::error("Section with prefix"),
-                                    log::prefix(&prefix),
-                                    log::error("not found")
-                                );
-                            }
+                            self.send(prefix, Request::Relocate(node));
                         }
-                        _ => {
-                            if let Some(section) = self.sections.get_mut(&prefix) {
-                                section.receive(request)
-                            } else {
-                                println!(
-                                    "{} {} {} for request {:?}",
-                                    log::error("Section with prefix"),
-                                    log::prefix(&prefix),
-                                    log::error("not found"),
-                                    request
-                                );
-                            }
-                        }
+                        _ => self.send(prefix, request),
                     }
                 }
             }
         }
 
         stats
+    }
+
+    fn find_matching_section(&mut self, name: Name) -> &mut Section {
+        if let Some(section) = self.sections.values_mut().find(|section| {
+            section.prefix().matches(name)
+        })
+        {
+            section
+        } else {
+            unreachable!()
+        }
+    }
+
+    fn send(&mut self, prefix: Prefix, request: Request) {
+        if let Some(section) = self.sections.get_mut(&prefix) {
+            section.receive(request)
+        } else {
+            debug!(
+                "{} {} {} {}",
+                log::error("Section with prefix"),
+                log::prefix(&prefix),
+                log::error("not found for request"),
+                log::message(&request),
+            );
+        }
     }
 
     fn check_section_sizes(&self) -> bool {

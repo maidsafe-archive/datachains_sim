@@ -7,7 +7,6 @@ use node::{self, Node};
 use params::Params;
 use prefix::{Name, Prefix};
 use random;
-use std::collections::BTreeSet;
 use std::fmt;
 use std::mem;
 use std::u64;
@@ -18,8 +17,8 @@ pub struct Section {
     nodes: HashMap<Name, Node>,
     chain: Chain,
     requests: Vec<Request>,
-    relocating_in_nodes: BTreeSet<Name>,
-    relocating_out_nodes: BTreeSet<Name>,
+    incoming_relocations: HashSet<Name>,
+    outgoing_relocations: HashSet<Name>,
 }
 
 impl Section {
@@ -30,8 +29,8 @@ impl Section {
             nodes: HashMap::default(),
             chain: Chain::new(),
             requests: Vec::new(),
-            relocating_in_nodes: BTreeSet::new(),
-            relocating_out_nodes: BTreeSet::new(),
+            incoming_relocations: HashSet::default(),
+            outgoing_relocations: HashSet::default(),
         }
     }
 
@@ -48,13 +47,12 @@ impl Section {
         node::count_adults(params, self.nodes.values()) >= params.group_size
     }
 
-    pub fn receive(&mut self, request: Request) {
-        self.requests.push(request)
+    pub fn has_incoming_relocation(&self) -> bool {
+        !self.incoming_relocations.is_empty()
     }
 
-    pub fn clear_relocating_cache(&mut self) {
-        self.relocating_out_nodes.clear();
-        self.relocating_in_nodes.clear();
+    pub fn receive(&mut self, request: Request) {
+        self.requests.push(request)
     }
 
     pub fn handle_requests(&mut self, params: &Params) -> Vec<Response> {
@@ -71,16 +69,18 @@ impl Section {
                 Request::Live(node) => self.handle_live(params, node),
                 Request::Dead(name) => self.handle_dead(params, name),
                 Request::Merge(prefix) => self.handle_merge(params, prefix),
-                Request::RelocateRequest(src, name, node_name) => {
-                    self.handle_relocate_request(params, src, name, node_name)
-                }
-                Request::RelocateAccept(dst, node_name) => {
+                Request::RelocateRequest {
+                    src,
+                    dst,
+                    node_name,
+                } => self.handle_relocate_request(params, src, dst, node_name),
+                Request::RelocateAccept { dst, node_name } => {
                     self.handle_relocate_accept(dst, node_name)
                 }
-                Request::Relocate(node) => self.handle_relocate(params, node),
-                Request::RelocateReject(target, node_name) => {
-                    self.handle_relocate_reject(target, node_name)
+                Request::RelocateReject { dst, node_name } => {
+                    self.handle_relocate_reject(dst, node_name)
                 }
+                Request::Relocate(node) => self.handle_relocate(params, node),
             })
         }
 
@@ -92,40 +92,14 @@ impl Section {
         self.chain.extend(other.chain);
         self.nodes.extend(other.nodes);
         self.requests.extend(other.requests);
-        self.relocating_out_nodes.clear();
+        self.outgoing_relocations.clear();
         let _ = self.update_elders(params, false);
     }
 
     /// Handle new node attempt to join us.
     fn handle_live(&mut self, params: &Params, node: Node) -> Vec<Response> {
-        // If we are splitting or merging, forward the request to the target
-        // section(s) of the split/merge.
-        match self.state {
-            State::Stable => (),
-            State::Splitting => {
-                for prefix in &self.prefix.split() {
-                    if prefix.matches(node.name()) {
-                        debug!(
-                            "{}: split in progress. Forwarding request to {}",
-                            log::prefix(&self.prefix),
-                            log::prefix(prefix)
-                        );
-
-                        return vec![Response::Send(*prefix, Request::Live(node))];
-                    }
-                }
-
-                unreachable!()
-            }
-            State::Merging(prefix) => {
-                debug!(
-                    "{}: merge in progress. Forwarding request to {}",
-                    log::prefix(&self.prefix),
-                    log::prefix(&prefix)
-                );
-
-                return vec![Response::Send(prefix, Request::Live(node))];
-            }
+        if let Some(prefix) = self.forward(node.name()) {
+            return vec![Response::Send(prefix, Request::Live(node))];
         }
 
         // During startup, nodes joining as adult (age of 5), and no relocation.
@@ -220,9 +194,14 @@ impl Section {
     }
 
     fn handle_relocate(&mut self, params: &Params, node: Node) -> Vec<Response> {
-        if !self.relocating_in_nodes.remove(&node.name()) {
+        if let Some(prefix) = self.forward(node.name()) {
+            return vec![Response::Send(prefix, Request::Live(node))];
+        }
+
+        if !self.incoming_relocations.remove(&node.name()) {
             return Vec::new();
         }
+
         let new_name = random::gen();
 
         // Pick the new node name so it would fall into the subsection with
@@ -247,8 +226,27 @@ impl Section {
         self.handle_live(params, Node::new(new_name, node.age()))
     }
 
-    fn handle_relocate_accept(&mut self, dst: Prefix, node_name: Name) -> Vec<Response> {
-        if self.relocating_out_nodes.remove(&node_name) {
+    fn handle_relocate_request(
+        &mut self,
+        params: &Params,
+        src: Prefix,
+        dst: Name,
+        node_name: Name,
+    ) -> Vec<Response> {
+        if !self.incoming_relocations.is_empty() || self.nodes.len() >= params.max_section_size {
+            vec![
+                Response::Send(src, Request::RelocateReject { dst, node_name }),
+            ]
+        } else {
+            let _ = self.incoming_relocations.insert(node_name);
+            vec![
+                Response::Send(src, Request::RelocateAccept { dst, node_name }),
+            ]
+        }
+    }
+
+    fn handle_relocate_accept(&mut self, dst: Name, node_name: Name) -> Vec<Response> {
+        if self.outgoing_relocations.remove(&node_name) {
             if let Some(mut node) = self.nodes.remove(&node_name) {
                 node.increment_age();
                 if node.is_elder() {
@@ -256,37 +254,25 @@ impl Section {
                     self.chain.insert(Event::Dead, node_name, node.age());
                 }
 
-                return vec![Response::Send(dst, Request::Relocate(node))];
+                return vec![Response::Relocate { dst, node }];
             }
         }
+
         Vec::new()
     }
 
-    fn handle_relocate_reject(&self, target: Name, node_name: Name) -> Vec<Response> {
-        if self.relocating_out_nodes.contains(&node_name) {
-            let dst = Name(Hash::new_from_u64(target.0).hash().to_u64());
-            vec![Response::RelocateRequest(self.prefix, dst, node_name)]
+    fn handle_relocate_reject(&self, dst: Name, node_name: Name) -> Vec<Response> {
+        if self.outgoing_relocations.contains(&node_name) {
+            let dst = Name(Hash::new_from_u64(dst.0).hash().to_u64());
+            vec![
+                Response::RelocateRequest {
+                    src: self.prefix,
+                    dst,
+                    node_name,
+                },
+            ]
         } else {
             Vec::new()
-        }
-    }
-
-    fn handle_relocate_request(
-        &mut self,
-        params: &Params,
-        src: Prefix,
-        target: Name,
-        node_name: Name,
-    ) -> Vec<Response> {
-        if !self.relocating_in_nodes.is_empty() || self.nodes.len() >= params.max_section_size {
-            vec![
-                Response::Send(src, Request::RelocateReject(target, node_name)),
-            ]
-        } else {
-            let _ = self.relocating_in_nodes.insert(node_name);
-            vec![
-                Response::Send(src, Request::RelocateAccept(self.prefix, node_name)),
-            ]
         }
     }
 
@@ -382,17 +368,23 @@ impl Section {
         }
 
         // When there is alread node waiting for relocation, don't relocate.
-        if !self.relocating_out_nodes.is_empty() {
+        if !self.outgoing_relocations.is_empty() {
             return Vec::new();
         }
 
         let mut hash = live_block.hash();
 
         for _ in 0..params.max_relocation_attempts {
-            if let Some(name) = self.check_relocate(params, &hash) {
-                let _ = self.relocating_out_nodes.insert(name);
-                let target = Name(hash.to_u64());
-                return vec![Response::RelocateRequest(self.prefix, target, name)];
+            if let Some(node_name) = self.check_relocate(params, &hash) {
+                let _ = self.outgoing_relocations.insert(node_name);
+                let dst = Name(hash.to_u64());
+                return vec![
+                    Response::RelocateRequest {
+                        src: self.prefix,
+                        dst,
+                        node_name,
+                    },
+                ];
             } else {
                 hash = hash.hash();
             }
@@ -516,6 +508,37 @@ impl Section {
             Some(node)
         } else {
             None
+        }
+    }
+
+    // If we are splitting or merging, return the prefix to forward a request to.
+    fn forward(&self, name: Name) -> Option<Prefix> {
+        match self.state {
+            State::Stable => None,
+            State::Splitting => {
+                for prefix in &self.prefix.split() {
+                    if prefix.matches(name) {
+                        debug!(
+                            "{}: split in progress. Forwarding request to {}",
+                            log::prefix(&self.prefix),
+                            log::prefix(prefix)
+                        );
+
+                        return Some(*prefix);
+                    }
+                }
+
+                unreachable!()
+            }
+            State::Merging(prefix) => {
+                debug!(
+                    "{}: merge in progress. Forwarding request to {}",
+                    log::prefix(&self.prefix),
+                    log::prefix(&prefix)
+                );
+
+                Some(prefix)
+            }
         }
     }
 }
