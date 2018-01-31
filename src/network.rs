@@ -49,6 +49,10 @@ impl Network {
         );
 
         let _ = self.check_section_sizes();
+        // Simulating time out of relocating cache
+        for section in self.sections.values_mut() {
+            section.clear_relocating_cache();
+        }
         true
     }
 
@@ -168,9 +172,15 @@ impl Network {
                 Response::Reject(_) => {
                     stats.rejections += 1;
                 }
-                Response::Relocate(node) => {
-                    stats.relocations += 1;
-                    self.handle_relocate(node)
+                Response::RelocateRequest(src, name, node) => {
+                    if let Some(section) = self.sections.values_mut().find(|section| {
+                        section.prefix().matches(name)
+                    })
+                    {
+                        section.receive(Request::RelocateRequest(src, name, node))
+                    } else {
+                        unreachable!()
+                    }
                 }
                 Response::Send(prefix, request) => {
                     match request {
@@ -185,15 +195,29 @@ impl Network {
                                 section.receive(Request::Merge(target_prefix))
                             }
                         }
+                        Request::Relocate(node) => {
+                            stats.relocations += 1;
+                            if let Some(section) = self.sections.get_mut(&prefix) {
+                                section.receive(Request::Relocate(node))
+                            } else {
+                                println!(
+                                    "{} {} {} for Request::Relocate",
+                                    log::error("Section with prefix"),
+                                    log::prefix(&prefix),
+                                    log::error("not found")
+                                );
+                            }
+                        }
                         _ => {
                             if let Some(section) = self.sections.get_mut(&prefix) {
                                 section.receive(request)
                             } else {
-                                panic!(
-                                    "{} {} {}",
+                                println!(
+                                    "{} {} {} for request {:?}",
                                     log::error("Section with prefix"),
                                     log::prefix(&prefix),
-                                    log::error("not found")
+                                    log::error("not found"),
+                                    request
                                 );
                             }
                         }
@@ -203,40 +227,6 @@ impl Network {
         }
 
         stats
-    }
-
-    fn handle_relocate(&mut self, mut node: Node) {
-        let new_name = random::gen();
-        if let Some(section) = self.sections.values_mut().find(|section| {
-            section.prefix().matches(new_name)
-        })
-        {
-            // Pick the new node name so it would fall into the subsection with
-            // fewer members, to keep the section balanced.
-            let prefixes = section.prefix().split();
-            let count0 =
-                node::count_matching_adults(&self.params, prefixes[0], section.nodes().values());
-            let count1 =
-                node::count_matching_adults(&self.params, prefixes[1], section.nodes().values());
-
-            let new_name = if count0 < count1 {
-                prefixes[0].substituted_in(new_name)
-            } else {
-                prefixes[1].substituted_in(new_name)
-            };
-
-            debug!(
-                "relocating {} -> {} to {}",
-                log::name(&node.name()),
-                log::name(&new_name),
-                log::prefix(&section.prefix()),
-            );
-
-            node.set_name(new_name);
-            section.receive(Request::Live(node))
-        } else {
-            unreachable!()
-        }
     }
 
     fn check_section_sizes(&self) -> bool {

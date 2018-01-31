@@ -28,8 +28,8 @@ impl Chain {
         }
     }
 
-    pub fn relocation_hash(&self, _name: Option<Name>) -> Option<Hash> {
-        self.last_live.as_ref().map(|block| block.hash())
+    pub fn last_live(&self) -> Option<Block> {
+        self.last_live.clone()
     }
 }
 
@@ -47,6 +47,10 @@ pub struct Block {
 }
 
 impl Block {
+    pub fn new(event: Event, name: Name, age: Age) -> Self {
+        Block { event, name, age }
+    }
+
     pub fn hash(&self) -> Hash {
         let mut bytes = [0; 17];
         bytes[0] = match self.event {
@@ -73,6 +77,19 @@ pub enum Event {
 pub struct Hash([u8; 32]);
 
 impl Hash {
+    pub fn new_from_u64(value: u64) -> Self {
+        let mut value_in = value;
+        let mut result: [u8; 32] = [0; 32];
+        for i in 0..8 {
+            result[7 - i] = (value_in % 256) as u8;
+            value_in = value_in / 256;
+            if value_in == 0 {
+                break;
+            }
+        }
+        Hash(result)
+    }
+
     pub fn hash(&self) -> Self {
         Hash(sha3_256(&self.0))
     }
@@ -90,6 +107,15 @@ impl Hash {
         }
 
         result as u64
+    }
+
+    pub fn to_u64(&self) -> u64 {
+        let mut result: u64 = 0;
+        for i in 0..8 {
+            let value = self.0[i];
+            result = result * 256 + value as u64;
+        }
+        result
     }
 }
 
