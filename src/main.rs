@@ -70,13 +70,13 @@ fn main() {
             format!("Iteration: {}", format!("{}", i).bold()).green()
         );
 
-        let result = network.tick(i);
+        network.tick(i);
 
         if params.stats_frequency > 0 && i % params.stats_frequency == 0 {
             print_tick_stats(&network, &mut max_prefix_len_diff);
         }
 
-        if !result || !running.load(Ordering::Relaxed) {
+        if !running.load(Ordering::Relaxed) {
             break;
         }
     }
@@ -154,7 +154,7 @@ fn get_params() -> Params {
                 .long("max-relocation-attempts")
                 .help("Maximum number of relocation attempts after a Live event")
                 .takes_value(true)
-                .default_value("5"),
+                .default_value("25"),
         )
         .arg(
             Arg::with_name("MAX_INFANTS_PER_SECTION")

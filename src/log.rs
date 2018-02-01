@@ -23,7 +23,8 @@ pub fn verbosity() -> usize {
 macro_rules! error {
     ($($arg:tt)*) => {
         if $crate::log::verbosity() >= $crate::log::ERROR {
-            println!($($arg)*)
+            use $crate::colored::Colorize;
+            println!("{}", format!($($arg)*).red())
         }
     }
 }
@@ -44,14 +45,6 @@ macro_rules! debug {
             println!($($arg)*)
         }
     }
-}
-
-pub fn important<T: ToString>(msg: T) -> ColoredString {
-    msg.to_string().bright_yellow()
-}
-
-pub fn error<T: ToString>(msg: T) -> ColoredString {
-    msg.to_string().red()
 }
 
 #[allow(unused)]
