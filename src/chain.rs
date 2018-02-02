@@ -16,9 +16,9 @@ impl Chain {
         Chain { last_live: None }
     }
 
-    pub fn insert(&mut self, event: Event, name: Name, age: Age) {
-        if let Event::Live = event {
-            self.last_live = Some(Block { event, name, age })
+    pub fn insert(&mut self, block: Block) {
+        if let Event::Live = block.event {
+            self.last_live = Some(block)
         }
     }
 
@@ -52,7 +52,7 @@ impl Block {
     }
 
     pub fn hash(&self) -> Hash {
-        let mut bytes = [0; 17];
+        let mut bytes = [0; 10];
         bytes[0] = match self.event {
             Event::Live => 0,
             Event::Dead => 1,
@@ -60,7 +60,7 @@ impl Block {
         };
 
         LittleEndian::write_u64(&mut bytes[1..], self.name.0);
-        LittleEndian::write_u64(&mut bytes[9..], self.age);
+        bytes[9] = self.age;
 
         Hash(sha3_256(&bytes))
     }
@@ -77,20 +77,7 @@ pub enum Event {
 pub struct Hash([u8; 32]);
 
 impl Hash {
-    pub fn new_from_u64(value: u64) -> Self {
-        let mut value_in = value;
-        let mut result: [u8; 32] = [0; 32];
-        for i in 0..8 {
-            result[7 - i] = (value_in % 256) as u8;
-            value_in = value_in / 256;
-            if value_in == 0 {
-                break;
-            }
-        }
-        Hash(result)
-    }
-
-    pub fn hash(&self) -> Self {
+    pub fn rehash(&self) -> Self {
         Hash(sha3_256(&self.0))
     }
 
@@ -108,14 +95,35 @@ impl Hash {
 
         result as u64
     }
+}
 
-    pub fn to_u64(&self) -> u64 {
+impl From<Name> for Hash {
+    fn from(src: Name) -> Self {
+        let mut value_in = src.0;
+        let mut result: [u8; 32] = [0; 32];
+
+        for i in 0..8 {
+            result[7 - i] = (value_in % 256) as u8;
+            value_in = value_in / 256;
+            if value_in == 0 {
+                break;
+            }
+        }
+
+        Hash(result)
+    }
+}
+
+impl Into<Name> for Hash {
+    fn into(self) -> Name {
         let mut result: u64 = 0;
+
         for i in 0..8 {
             let value = self.0[i];
             result = result * 256 + value as u64;
         }
-        result
+
+        Name(result)
     }
 }
 

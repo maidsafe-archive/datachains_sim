@@ -11,9 +11,9 @@ pub struct Params {
     /// Number of nodes to form a complete group.
     pub group_size: usize,
     /// Age of newly joined node.
-    pub init_age: u64,
+    pub init_age: u8,
     /// Age at which a node becomes adult.
-    pub adult_age: u64,
+    pub adult_age: u8,
     /// Maximum number of nodes a section can have before the simulation fails.
     pub max_section_size: usize,
     /// Maximum number of reocation attempts after a `Live` event.

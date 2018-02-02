@@ -1,10 +1,9 @@
 use HashMap;
 use log;
-use message::{Request, Response};
-use node::{self, Node};
+use message::{Action, Message};
+use node;
 use params::Params;
 use prefix::Prefix;
-use random;
 use section::Section;
 use stats::{Distribution, Stats};
 use std::ops::AddAssign;
@@ -28,15 +27,29 @@ impl Network {
         }
     }
 
-    /// Execute single iteration of the simulation. Returns `true` if the
-    /// simulation is running successfuly so far, `false` if it failed and should
-    /// be stopped.
-    pub fn tick(&mut self, iterations: u64) -> bool {
-        self.generate_random_messages();
-        let stats = self.handle_messages();
+    /// Execute single iteration of the simulation.
+    pub fn tick(&mut self, iteration: u64) {
+        let mut actions = Vec::new();
+        let mut stats = TickStats::new();
+
+        for section in self.sections.values_mut() {
+            section.prepare();
+        }
+
+        loop {
+            for section in self.sections.values_mut() {
+                actions.extend(section.tick(&self.params));
+            }
+
+            if actions.is_empty() {
+                break;
+            }
+
+            stats += self.handle_actions(&mut actions)
+        }
 
         self.stats.record(
-            iterations,
+            iteration,
             self.sections
                 .values()
                 .map(|section| section.nodes().len() as u64)
@@ -48,12 +61,7 @@ impl Network {
             stats.rejections,
         );
 
-        let _ = self.check_section_sizes();
-        // Simulating time out of relocating cache
-        for section in self.sections.values_mut() {
-            section.clear_relocating_cache();
-        }
-        true
+        let _ = self.validate();
     }
 
     pub fn stats(&self) -> &Stats {
@@ -87,140 +95,103 @@ impl Network {
         Distribution::new(self.sections.keys().map(|prefix| prefix.len() as u64))
     }
 
-    fn generate_random_messages(&mut self) {
-        let mut adds = 0;
-        let mut drops = 0;
 
-        for section in self.sections.values_mut() {
-            if random::gen() {
-                add_random_node(&self.params, section);
-                adds += 1;
-
-                if drop_random_node(&self.params, section) {
-                    drops += 1;
-                }
-            } else {
-                if drop_random_node(&self.params, section) {
-                    drops += 1;
-                }
-
-                add_random_node(&self.params, section);
-                adds += 1;
-            }
-        }
-
-        info!(
-            "Random Adds: {} Drops: {}",
-            log::important(adds),
-            log::important(drops)
-        );
-    }
-
-    fn handle_messages(&mut self) -> TickStats {
-        let mut responses = Vec::new();
+    fn handle_actions(&mut self, actions: &mut Vec<Action>) -> TickStats {
         let mut stats = TickStats::new();
 
-        loop {
-            for section in self.sections.values_mut() {
-                responses.extend(section.handle_requests(&self.params));
-            }
-
-            if responses.is_empty() {
-                break;
-            }
-
-            stats += self.handle_responses(&mut responses)
-        }
-
-        stats
-    }
-
-    fn handle_responses(&mut self, responses: &mut Vec<Response>) -> TickStats {
-        let mut stats = TickStats::new();
-
-        for response in responses.drain(..) {
-            match response {
-                Response::Merge(section, old_prefix) => {
-                    self.sections
-                        .entry(section.prefix())
-                        .or_insert_with(|| {
-                            stats.merges += 1;
-                            Section::new(section.prefix())
-                        })
-                        .merge(&self.params, section);
-                    let _ = self.sections.remove(&old_prefix);
+        for action in actions.drain(..) {
+            match action {
+                Action::Reject(_) => {
+                    stats.rejections += 1;
                 }
-                Response::Split(section0, section1, old_prefix) => {
+                Action::Merge(target) => {
+                    let sources: Vec<_> = self.sections
+                        .keys()
+                        .filter(|prefix| prefix.is_descendant(&target))
+                        .cloned()
+                        .collect();
+
+                    if sources.is_empty() {
+                        // Merge action with the same target can be potentially
+                        // emitted multiple times per tick.
+                        // This can happen for example when both pre-merge sections
+                        // lose a node in the same tick, triggering merge in both of
+                        // them. That's why not finding any pre-merge section is
+                        // not an error and can be safely ignored.
+                        debug!(
+                            "Pre-merge sections not found (to be merged to {})",
+                            log::prefix(&target)
+                        );
+                        continue;
+                    }
+
+                    let sources: Vec<_> = sources
+                        .into_iter()
+                        .map(|source| self.sections.remove(&source).unwrap())
+                        .collect();
+
+                    stats.merges += 1;
+
+                    let section = self.sections.entry(target).or_insert_with(
+                        || Section::new(target),
+                    );
+                    for source in sources {
+                        section.merge(&self.params, source);
+                    }
+                }
+                Action::Split(source) => {
                     stats.splits += 1;
 
-                    let prefix0 = section0.prefix();
-                    let prefix1 = section1.prefix();
+                    let source = if let Some(section) = self.sections.remove(&source) {
+                        section
+                    } else {
+                        // This can happen for example in the following situation:
+                        // 1. Section P0 decides it needs to merge with P1.
+                        // 2. P1 gets new node (via join or relocation) which triggers
+                        //    a split.
+                        // 3. `Merge(P)` action is handled first, merging P0 and P1
+                        //    into P.
+                        // 4. `Split(P1)` action is handled next, but P1 is no longer there.
+                        //
+                        // This situation is valid, so it's OK to ignore the missing
+                        // sections here.
+                        //
+                        // On the other hand, this line should never be reached due to
+                        // `Split` being emitted more than once, because split can
+                        // only be triggered by join or relocation, and those happen
+                        // at most once per section tick.
+                        debug!("Pre-split section {} not found", log::prefix(&source));
+                        continue;
+                    };
+
+                    let (target0, target1) = source.split(&self.params);
+                    let prefix0 = target0.prefix();
+                    let prefix1 = target1.prefix();
 
                     assert!(
-                        self.sections.insert(prefix0, section0).is_none(),
+                        self.sections.insert(prefix0, target0).is_none(),
                         "section with prefix [{}] already exists",
                         prefix0
                     );
                     assert!(
-                        self.sections.insert(prefix1, section1).is_none(),
+                        self.sections.insert(prefix1, target1).is_none(),
                         "section with prefix [{}] already exists",
                         prefix1
                     );
-
-                    let _ = self.sections.remove(&old_prefix);
                 }
-                Response::Reject(_) => {
-                    stats.rejections += 1;
-                }
-                Response::RelocateRequest(src, name, node) => {
+                Action::Send(message) => {
+                    let target = message.target();
                     if let Some(section) = self.sections.values_mut().find(|section| {
-                        section.prefix().matches(name)
+                        section.prefix().matches(target)
                     })
                     {
-                        section.receive(Request::RelocateRequest(src, name, node))
-                    } else {
-                        unreachable!()
-                    }
-                }
-                Response::Send(prefix, request) => {
-                    match request {
-                        Request::Merge(target_prefix) => {
-                            // The receiver of `Merge` might not exists, because
-                            // it might have already split. So send the request
-                            // to every section with matching prefix.
-                            for section in self.sections.values_mut().filter(|section| {
-                                prefix.is_ancestor(&section.prefix())
-                            })
-                            {
-                                section.receive(Request::Merge(target_prefix))
-                            }
-                        }
-                        Request::Relocate(node) => {
+                        if let Message::RelocateCommit { .. } = message {
                             stats.relocations += 1;
-                            if let Some(section) = self.sections.get_mut(&prefix) {
-                                section.receive(Request::Relocate(node))
-                            } else {
-                                println!(
-                                    "{} {} {} for Request::Relocate",
-                                    log::error("Section with prefix"),
-                                    log::prefix(&prefix),
-                                    log::error("not found")
-                                );
-                            }
                         }
-                        _ => {
-                            if let Some(section) = self.sections.get_mut(&prefix) {
-                                section.receive(request)
-                            } else {
-                                println!(
-                                    "{} {} {} for request {:?}",
-                                    log::error("Section with prefix"),
-                                    log::prefix(&prefix),
-                                    log::error("not found"),
-                                    request
-                                );
-                            }
-                        }
+
+                        section.receive(message)
+                    } else {
+                        panic!("No section maching {:?} found", target)
                     }
                 }
             }
@@ -229,52 +200,48 @@ impl Network {
         stats
     }
 
-    fn check_section_sizes(&self) -> bool {
-        if let Some(section) = self.sections.values().find(|section| {
-            section.nodes().len() > self.params.max_section_size
-        })
-        {
-            let prefixes = section.prefix().split();
-            let count0 =
-                node::count_matching_adults(&self.params, prefixes[0], section.nodes().values());
-            let count1 =
-                node::count_matching_adults(&self.params, prefixes[1], section.nodes().values());
+    fn validate(&self) {
+        for section in self.sections.values() {
+            if section.nodes().len() > self.params.max_section_size {
+                let prefixes = section.prefix().split();
+                let count0 = node::count_matching_adults(
+                    &self.params,
+                    prefixes[0],
+                    section.nodes().values(),
+                );
+                let count1 = node::count_matching_adults(
+                    &self.params,
+                    prefixes[1],
+                    section.nodes().values(),
+                );
 
-            error!(
-                "{}: {}: {} (adults per subsections: [..0]: {}, [..1]: {})",
-                log::prefix(&section.prefix()),
-                log::error("too many nodes"),
-                section.nodes().len(),
-                count0,
-                count1,
-            );
-            false
-        } else {
-            true
+                error!(
+                    "{}: too many nodes: {} (adults per subsections: [..0]: {}, [..1]: {})",
+                    log::prefix(&section.prefix()),
+                    section.nodes().len(),
+                    count0,
+                    count1,
+                );
+            }
+
+            let incoming = section.incoming_relocations();
+            if incoming.len() > 0 {
+                panic!(
+                    "{}: incoming relocation cache not cleared: {:?}",
+                    log::prefix(&section.prefix()),
+                    incoming,
+                )
+            }
+
+            let outgoing = section.outgoing_relocations();
+            if outgoing.len() > 0 {
+                panic!(
+                    "{}: outgoing relocation cache not cleared: {:?}",
+                    log::prefix(&section.prefix()),
+                    outgoing,
+                )
+            }
         }
-    }
-}
-
-// Generate random `Live` request in the given section.
-fn add_random_node(params: &Params, section: &mut Section) {
-    let name = section.prefix().substituted_in(random::gen());
-    section.receive(Request::Live(Node::new(name, params.init_age)));
-}
-
-// Generate random `Dead` request in the given section.
-fn drop_random_node(_params: &Params, section: &mut Section) -> bool {
-    let name = node::by_age(section.nodes().values())
-        .into_iter()
-        .find(|node| {
-            random::gen_bool_with_probability(node.drop_probability())
-        })
-        .map(|node| node.name());
-
-    if let Some(name) = name {
-        section.receive(Request::Dead(name));
-        true
-    } else {
-        false
     }
 }
 

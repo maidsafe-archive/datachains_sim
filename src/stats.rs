@@ -16,22 +16,32 @@ impl Distribution {
     where
         I: IntoIterator<Item = u64>,
     {
-        let mut min = u64::MAX;
-        let mut max = 0;
-        let mut avg = 0;
-        let mut num = 0;
+        let mut values = values.into_iter();
 
-        for value in values {
-            min = cmp::min(min, value);
-            max = cmp::max(max, value);
-            avg += value;
-            num += 1;
-        }
+        if let Some(value) = values.next() {
+            let mut min = value;
+            let mut max = value;
+            let mut avg = value;
+            let mut num = 1;
 
-        Distribution {
-            min,
-            max,
-            avg: avg as f64 / num as f64,
+            for value in values {
+                min = cmp::min(min, value);
+                max = cmp::max(max, value);
+                avg += value;
+                num += 1;
+            }
+
+            Distribution {
+                min,
+                max,
+                avg: avg as f64 / num as f64,
+            }
+        } else {
+            Distribution {
+                min: 0,
+                max: 0,
+                avg: 0.0,
+            }
         }
     }
 }
@@ -58,7 +68,7 @@ impl fmt::Display for Distribution {
 
 #[derive(Clone, Copy, Default)]
 pub struct Sample {
-    iterations: u64,
+    iteration: u64,
     nodes: u64,
     sections: u64,
     merges: u64,
@@ -71,14 +81,14 @@ impl fmt::Debug for Sample {
     fn fmt(&self, fmt: &mut fmt::Formatter) -> fmt::Result {
         write!(
             fmt,
-            "{{ iterations: {}, \
+            "{{ iteration: {}, \
             nodes: {}, \
             sections: {}, \
             merges: {}, \
             splits: {}, \
             relocations: {} \
             rejections: {} }}",
-            self.iterations,
+            self.iteration,
             self.nodes,
             self.sections,
             self.merges,
@@ -92,14 +102,14 @@ impl fmt::Debug for Sample {
 impl fmt::Display for Sample {
     fn fmt(&self, fmt: &mut fmt::Formatter) -> fmt::Result {
         writeln!(fmt,
-            "Iterations:  {:>8}\n\
+            "Iteration:   {:>8}\n\
              Nodes:       {:>8}\n\
              Sections:    {:>8}\n\
              Merges:      {:>8}\n\
              Splits:      {:>8}\n\
              Relocations: {:>8}\n\
              Rejections:  {:>8}",
-            self.iterations,
+            self.iteration,
             self.nodes,
             self.sections,
             self.merges,
@@ -131,7 +141,7 @@ impl Stats {
 
     pub fn record(
         &mut self,
-        iterations: u64,
+        iteration: u64,
         total_nodes: u64,
         total_sections: u64,
         merges: u64,
@@ -145,7 +155,7 @@ impl Stats {
         self.total_rejections += rejections;
 
         self.samples.push(Sample {
-            iterations,
+            iteration,
             nodes: total_nodes,
             sections: total_sections,
             merges: self.total_merges,
@@ -172,7 +182,7 @@ impl Stats {
                 write!(
                 file,
                 "{} {} {} {} {} {} {}\n",
-                sample.iterations,
+                sample.iteration,
                 sample.nodes,
                 sample.sections,
                 sample.merges,

@@ -33,7 +33,7 @@ use std::str::FromStr;
 use std::sync::Arc;
 use std::sync::atomic::{AtomicBool, Ordering};
 
-type Age = u64;
+type Age = u8;
 
 fn main() {
     let params = get_params();
@@ -70,13 +70,13 @@ fn main() {
             format!("Iteration: {}", format!("{}", i).bold()).green()
         );
 
-        let result = network.tick(i);
+        network.tick(i);
 
         if params.stats_frequency > 0 && i % params.stats_frequency == 0 {
             print_tick_stats(&network, &mut max_prefix_len_diff);
         }
 
-        if !result || !running.load(Ordering::Relaxed) {
+        if !running.load(Ordering::Relaxed) {
             break;
         }
     }
@@ -154,7 +154,7 @@ fn get_params() -> Params {
                 .long("max-relocation-attempts")
                 .help("Maximum number of relocation attempts after a Live event")
                 .takes_value(true)
-                .default_value("5"),
+                .default_value("25"),
         )
         .arg(
             Arg::with_name("MAX_INFANTS_PER_SECTION")
@@ -238,8 +238,9 @@ fn get_number<T: Number>(matches: &ArgMatches, name: &str) -> T {
 }
 
 trait Number: FromStr {}
-impl Number for usize {}
+impl Number for u8 {}
 impl Number for u64 {}
+impl Number for usize {}
 
 // Use these type aliases instead of the default collections to make sure
 // we use consistent hashing across runs, to enable deterministic results.
