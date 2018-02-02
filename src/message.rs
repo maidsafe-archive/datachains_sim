@@ -1,7 +1,7 @@
 use node::Node;
 use prefix::{Name, Prefix};
 
-/// Network message (RPC),
+/// Network message (RPC).
 /// Note: these do not necessarily correspond to the RPCs of the real network,
 /// because this simulation abstracts lot of the real stuff away.
 #[derive(Debug)]

@@ -52,6 +52,10 @@ impl Section {
         self.incoming_relocations.keys()
     }
 
+    pub fn outgoing_relocations(&self) -> hash_map::Keys<Name, Name> {
+        self.outgoing_relocations.keys()
+    }
+
     /// Call this at the begining of each simulation tick to reset some internal state.
     pub fn prepare(&mut self) {
         self.churned = false
@@ -339,12 +343,11 @@ impl Section {
 
     fn handle_relocate_commit(&mut self, params: &Params, node: Node) -> Option<Action> {
         if self.incoming_relocations.remove(&node.name()).is_none() {
-            error!(
+            panic!(
                 "{}: cannot commit relocation of {}: not found in incoming relocation cache",
                 log::prefix(&self.prefix),
                 log::name(&node.name())
             );
-            return None;
         }
 
         // Pick the new node name so it would fall into the subsection with

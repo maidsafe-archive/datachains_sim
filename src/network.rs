@@ -112,6 +112,11 @@ impl Network {
                         .collect();
 
                     if sources.is_empty() {
+                        // No pre-merge section exists due to being already merged.
+                        debug!(
+                            "Pre-merge sections not found (to be merged to {})",
+                            log::prefix(&target)
+                        );
                         continue;
                     }
 
@@ -204,9 +209,18 @@ impl Network {
             let incoming = section.incoming_relocations();
             if incoming.len() > 0 {
                 panic!(
-                    "{}: relocation cache not cleared: {:?}",
+                    "{}: incoming relocation cache not cleared: {:?}",
                     log::prefix(&section.prefix()),
                     incoming,
+                )
+            }
+
+            let outgoing = section.outgoing_relocations();
+            if outgoing.len() > 0 {
+                panic!(
+                    "{}: outgoing relocation cache not cleared: {:?}",
+                    log::prefix(&section.prefix()),
+                    outgoing,
                 )
             }
         }
