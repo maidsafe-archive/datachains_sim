@@ -145,11 +145,18 @@ impl Network {
                     let source = if let Some(section) = self.sections.remove(&source) {
                         section
                     } else {
-                        // Split can be triggered only by join or relocation,
-                        // which can happen at most once per section tick, so
-                        // a split can also happen at most once, so it should not
-                        // be possible to reach this line.
-                        panic!("Pre-split section {} not found", log::prefix(&source));
+                        // This can happen for example in the following situation:
+                        // 1. Section P0 decides it needs to merge with P1.
+                        // 2. P1 gets new node (via join or relocation) which triggers
+                        //    a split.
+                        // 3. `Merge(P)` action is handled first, merging P0 and P1
+                        //    into P.
+                        // 4. `Split(P1)` action is handled next, but P1 is no longer there.
+                        //
+                        // This situation is valid, so it's OK to ignore the missing
+                        // sections here.
+                        debug!("Pre-split section {} not found", log::prefix(&source));
+                        continue;
                     };
 
                     let (target0, target1) = source.split(&self.params);
