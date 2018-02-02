@@ -155,6 +155,11 @@ impl Network {
                         //
                         // This situation is valid, so it's OK to ignore the missing
                         // sections here.
+                        //
+                        // On the other hand, this line should never be reached due to
+                        // `Split` being emitted more than once, because split can
+                        // only be triggered by join or relocation, and those happen
+                        // at most once per section tick.
                         debug!("Pre-split section {} not found", log::prefix(&source));
                         continue;
                     };

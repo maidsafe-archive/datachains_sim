@@ -19,7 +19,8 @@ pub struct Section {
     messages: Vec<Message>,
     incoming_relocations: HashMap<Name, Name>,
     outgoing_relocations: HashMap<Name, Name>,
-    churned: bool,
+    recent_join: bool,
+    recent_drop: bool,
 }
 
 impl Section {
@@ -31,7 +32,8 @@ impl Section {
             messages: Vec::new(),
             incoming_relocations: HashMap::default(),
             outgoing_relocations: HashMap::default(),
-            churned: false,
+            recent_join: false,
+            recent_drop: false,
         }
     }
 
@@ -58,7 +60,8 @@ impl Section {
 
     /// Call this at the begining of each simulation tick to reset some internal state.
     pub fn prepare(&mut self) {
-        self.churned = false
+        self.recent_join = false;
+        self.recent_drop = false;
     }
 
     /// Single simulation iteration of this section.
@@ -98,7 +101,7 @@ impl Section {
             }
         }
 
-        if !self.churned && !relocated_in {
+        if !relocated_in {
             if self.incoming_relocations.is_empty() {
                 if random::gen() {
                     actions.extend(self.random_join(params));
@@ -110,8 +113,6 @@ impl Section {
             } else {
                 actions.extend(self.random_drop(params));
             }
-
-            self.churned = true;
         }
 
         actions
@@ -379,12 +380,22 @@ impl Section {
 
     // Simulate random node attempt to join this section.
     fn random_join(&mut self, params: &Params) -> Option<Action> {
+        if self.recent_join {
+            return None;
+        }
+        self.recent_join = true;
+
         let name = self.prefix.substituted_in(random::gen());
         self.handle_live(params, Node::new(name, params.init_age))
     }
 
     // Simulate random node disconnecting.
     fn random_drop(&mut self, params: &Params) -> Vec<Action> {
+        if self.recent_drop {
+            return Vec::new();
+        }
+        self.recent_drop = true;
+
         let name = node::by_age(self.nodes.values())
             .into_iter()
             .find(|node| {
