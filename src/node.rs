@@ -48,7 +48,7 @@ impl Node {
     }
 
     pub fn increment_age(&mut self) {
-        self.age = self.age.saturating_add(1);
+        self.age = self.age.checked_add(1).expect("age overflow")
     }
 
     /// Returns the probability this node will be dropped.

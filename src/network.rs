@@ -112,7 +112,12 @@ impl Network {
                         .collect();
 
                     if sources.is_empty() {
-                        // No pre-merge section exists due to being already merged.
+                        // Merge action with the same target can be potentially
+                        // emitted multiple times per tick.
+                        // This can happen for example when both pre-merge sections
+                        // lose a node in the same tick, triggering merge in both of
+                        // them. That's why not finding any pre-merge section is
+                        // not an error and can be safely ignored.
                         debug!(
                             "Pre-merge sections not found (to be merged to {})",
                             log::prefix(&target)
@@ -140,10 +145,11 @@ impl Network {
                     let source = if let Some(section) = self.sections.remove(&source) {
                         section
                     } else {
-                        // Pre-split section does not exists due to being already merged
-                        // or split.
-                        debug!("Pre-split section {} not found", log::prefix(&source));
-                        continue;
+                        // Split can be triggered only by join or relocation,
+                        // which can happen at most once per section tick, so
+                        // a split can also happen at most once, so it should not
+                        // be possible to reach this line.
+                        panic!("Pre-split section {} not found", log::prefix(&source));
                     };
 
                     let (target0, target1) = source.split(&self.params);

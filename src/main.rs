@@ -33,7 +33,7 @@ use std::str::FromStr;
 use std::sync::Arc;
 use std::sync::atomic::{AtomicBool, Ordering};
 
-type Age = u64;
+type Age = u8;
 
 fn main() {
     let params = get_params();
@@ -238,8 +238,9 @@ fn get_number<T: Number>(matches: &ArgMatches, name: &str) -> T {
 }
 
 trait Number: FromStr {}
-impl Number for usize {}
+impl Number for u8 {}
 impl Number for u64 {}
+impl Number for usize {}
 
 // Use these type aliases instead of the default collections to make sure
 // we use consistent hashing across runs, to enable deterministic results.

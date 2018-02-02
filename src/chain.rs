@@ -52,7 +52,7 @@ impl Block {
     }
 
     pub fn hash(&self) -> Hash {
-        let mut bytes = [0; 17];
+        let mut bytes = [0; 10];
         bytes[0] = match self.event {
             Event::Live => 0,
             Event::Dead => 1,
@@ -60,7 +60,7 @@ impl Block {
         };
 
         LittleEndian::write_u64(&mut bytes[1..], self.name.0);
-        LittleEndian::write_u64(&mut bytes[9..], self.age);
+        bytes[9] = self.age;
 
         Hash(sha3_256(&bytes))
     }

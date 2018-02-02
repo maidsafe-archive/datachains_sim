@@ -10,7 +10,7 @@ use random;
 use std::collections::hash_map::{self, Entry};
 use std::fmt;
 use std::mem;
-use std::u64;
+use std::u8;
 
 pub struct Section {
     prefix: Prefix,
@@ -502,7 +502,7 @@ impl Section {
             return None;
         }
 
-        candidates.sort_by_key(|node| u64::MAX - node.age());
+        candidates.sort_by_key(|node| u8::MAX - node.age());
 
         let age = candidates[0].age();
         let index = candidates
@@ -521,7 +521,7 @@ impl Section {
     fn relocation_candidates(&self, hash: &Hash) -> Vec<&Node> {
         // The actual formula is: `hash % 2^age == 0`, the following is equivalent
         // but more efficient:
-        let trailing_zeros = hash.trailing_zeros();
+        let trailing_zeros = hash.trailing_zeros() as u8;
         self.nodes
             .values()
             .filter(|node| node.age() <= trailing_zeros)
