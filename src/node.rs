@@ -2,6 +2,7 @@ use Age;
 use params::Params;
 use prefix::{Name, Prefix};
 use std::fmt;
+use std::u8;
 
 #[derive(Eq, PartialEq, Hash)]
 pub struct Node {
@@ -48,6 +49,10 @@ impl Node {
     }
 
     pub fn increment_age(&mut self) {
+        if self.age == u8::MAX - 1 {
+            error!("Node {:?} reached maximum age {}", self.name, self.age + 1);
+        }
+
         self.age = self.age.saturating_add(1)
     }
 
