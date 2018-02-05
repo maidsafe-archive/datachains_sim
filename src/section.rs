@@ -519,7 +519,7 @@ impl Section {
         let index = candidates
             .iter()
             .position(|node| node.age() != age)
-            .unwrap_or(candidates.len());
+            .unwrap_or_else(|| candidates.len());
         candidates.truncate(index);
 
         if candidates.len() == 1 {

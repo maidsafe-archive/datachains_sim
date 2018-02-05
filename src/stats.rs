@@ -191,6 +191,7 @@ impl Stats {
         }
     }
 
+    #[cfg_attr(feature = "cargo-clippy", allow(too_many_arguments))]
     pub fn record(
         &mut self,
         iteration: u64,
@@ -224,10 +225,8 @@ impl Stats {
     pub fn write_to_file<P: AsRef<Path>>(&self, path: P) {
         let path = path.as_ref();
 
-        let mut file = File::create(path).ok().expect(&format!(
-            "Couldn't create file {}!",
-            path.display()
-        ));
+        let mut file =
+            File::create(path).expect(&format!("Couldn't create file {}!", path.display()));
 
         for sample in &self.samples {
             let _ =

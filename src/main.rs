@@ -234,7 +234,7 @@ fn print_tick_stats(network: &Network, max_prefix_len_diff: &mut u64) {
 fn get_number<T: Number>(matches: &ArgMatches, name: &str) -> T {
     match matches.value_of(name).unwrap().parse() {
         Ok(value) => value,
-        Err(_) => panic!("{} must be a number.", name),
+        Err(_err) => panic!("{} must be a number.", name),
     }
 }
 

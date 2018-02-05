@@ -1,5 +1,5 @@
 [package]
-name = "ageing_sim"
+name = "datachains_sim"
 version = "0.2.0"
 authors = ["MaidSafe Developers <dev@maidsafe.net>"]
 

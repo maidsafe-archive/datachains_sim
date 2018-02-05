@@ -35,8 +35,8 @@ impl FromStr for Seed {
             .filter_map(|s| s.parse().ok());
         let mut result = [0; 4];
 
-        for i in 0..result.len() {
-            result[i] = tokens.next().ok_or(ParseError)?;
+        for result in &mut result {
+            *result = tokens.next().ok_or(ParseError)?;
         }
 
         Ok(Seed(result))

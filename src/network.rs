@@ -61,7 +61,7 @@ impl Network {
             stats.rejections,
         );
 
-        let _ = self.validate();
+        self.validate();
     }
 
     pub fn stats(&self) -> &Stats {

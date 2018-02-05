@@ -1,16 +1,4 @@
 [[package]]
-name = "ageing_sim"
-version = "0.2.0"
-dependencies = [
- "byteorder 1.2.1 (registry+https://github.com/rust-lang/crates.io-index)",
- "clap 2.29.2 (registry+https://github.com/rust-lang/crates.io-index)",
- "colored 1.6.0 (registry+https://github.com/rust-lang/crates.io-index)",
- "ctrlc 3.1.0 (registry+https://github.com/rust-lang/crates.io-index)",
- "rand 0.3.20 (registry+https://github.com/rust-lang/crates.io-index)",
- "tiny-keccak 1.4.0 (registry+https://github.com/rust-lang/crates.io-index)",
-]
-
-[[package]]
 name = "ansi_term"
 version = "0.10.2"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -75,6 +63,18 @@ dependencies = [
  "kernel32-sys 0.2.2 (registry+https://github.com/rust-lang/crates.io-index)",
  "nix 0.9.0 (registry+https://github.com/rust-lang/crates.io-index)",
  "winapi 0.2.8 (registry+https://github.com/rust-lang/crates.io-index)",
+]
+
+[[package]]
+name = "datachains_sim"
+version = "0.2.0"
+dependencies = [
+ "byteorder 1.2.1 (registry+https://github.com/rust-lang/crates.io-index)",
+ "clap 2.29.2 (registry+https://github.com/rust-lang/crates.io-index)",
+ "colored 1.6.0 (registry+https://github.com/rust-lang/crates.io-index)",
+ "ctrlc 3.1.0 (registry+https://github.com/rust-lang/crates.io-index)",
+ "rand 0.3.20 (registry+https://github.com/rust-lang/crates.io-index)",
+ "tiny-keccak 1.4.0 (registry+https://github.com/rust-lang/crates.io-index)",
 ]
 
 [[package]]
