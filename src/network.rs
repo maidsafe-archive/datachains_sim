@@ -81,7 +81,7 @@ impl Network {
             self.sections
                 .values()
                 .flat_map(|section| section.nodes().values())
-                .map(|node| node.age() as u64),
+                .map(|node| u64::from(node.age())),
         )
     }
 
@@ -92,7 +92,7 @@ impl Network {
     }
 
     pub fn prefix_len_dist(&self) -> Distribution {
-        Distribution::new(self.sections.keys().map(|prefix| prefix.len() as u64))
+        Distribution::new(self.sections.keys().map(|prefix| u64::from(prefix.len())))
     }
 
 

@@ -34,7 +34,7 @@ impl Distribution {
             Distribution {
                 min,
                 max,
-                avg: avg as f64 / num as f64,
+                avg: avg as f64 / f64::from(num),
             }
         } else {
             Distribution {
@@ -166,7 +166,7 @@ impl Stats {
     }
 
     pub fn summary(&self) -> Sample {
-        self.samples.last().cloned().unwrap_or(Sample::default())
+        self.samples.last().cloned().unwrap_or_default()
     }
 
     pub fn write_to_file<P: AsRef<Path>>(&self, path: P) {

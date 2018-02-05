@@ -93,7 +93,7 @@ impl Hash {
             }
         }
 
-        result as u64
+        u64::from(result)
     }
 }
 
@@ -104,7 +104,7 @@ impl From<Name> for Hash {
 
         for i in 0..8 {
             result[7 - i] = (value_in % 256) as u8;
-            value_in = value_in / 256;
+            value_in /= 256;
             if value_in == 0 {
                 break;
             }
@@ -120,7 +120,7 @@ impl Into<Name> for Hash {
 
         for i in 0..8 {
             let value = self.0[i];
-            result = result * 256 + value as u64;
+            result = result * 256 + u64::from(value);
         }
 
         Name(result)
