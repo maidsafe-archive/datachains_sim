@@ -92,7 +92,7 @@ impl Section {
                     actions.extend(self.handle_relocate_reject(params, node_name, target));
                 }
                 Message::RelocateCommit { node, .. } => {
-                    if let Some(action) = self.handle_relocate_commit(params, node) {
+                    if let Some(action) = self.handle_relocate_commit(params, &node) {
                         relocated_in = true;
                         actions.push(action);
                     }
@@ -223,7 +223,7 @@ impl Section {
         if let Some(action) = self.try_split(params) {
             Some(action)
         } else if is_adult {
-            self.try_relocate(params, Block::new(Event::Live, name, age))
+            self.try_relocate(params, &Block::new(Event::Live, name, age))
         } else {
             None
         }
@@ -251,7 +251,7 @@ impl Section {
             if node.is_adult(params) {
                 self.update_elders(params);
                 if let Some(block) = self.chain.last_live() {
-                    actions.extend(self.try_relocate(params, block));
+                    actions.extend(self.try_relocate(params, &block));
                 }
             }
         }
@@ -318,7 +318,7 @@ impl Section {
                     debug!(
                         "{}: cancelling relocation of {} (not beneficial anymore)",
                         log::prefix(&self.prefix),
-                        log::name(&entry.key())
+                        log::name(entry.key())
                     );
 
                     entry.remove();
@@ -330,7 +330,7 @@ impl Section {
                     debug!(
                         "{}: re-initiating relocation of {} to {}",
                         log::prefix(&self.prefix),
-                        log::name(&entry.key()),
+                        log::name(entry.key()),
                         log::name(&target)
                     );
 
@@ -342,7 +342,7 @@ impl Section {
         }
     }
 
-    fn handle_relocate_commit(&mut self, params: &Params, node: Node) -> Option<Action> {
+    fn handle_relocate_commit(&mut self, params: &Params, node: &Node) -> Option<Action> {
         if self.incoming_relocations.remove(&node.name()).is_none() {
             panic!(
                 "{}: cannot commit relocation of {}: not found in incoming relocation cache",
@@ -465,7 +465,7 @@ impl Section {
         Some(Action::Merge(target))
     }
 
-    fn try_relocate(&mut self, params: &Params, live_block: Block) -> Option<Action> {
+    fn try_relocate(&mut self, params: &Params, live_block: &Block) -> Option<Action> {
         // Do not relocate during startup.
         if self.prefix == Prefix::EMPTY {
             return None;

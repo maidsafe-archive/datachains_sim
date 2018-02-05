@@ -53,7 +53,7 @@ impl Node {
 
     /// Returns the probability this node will be dropped.
     pub fn drop_probability(&self) -> f64 {
-        2f64.powf(-(self.age as f64))
+        2f64.powf(-f64::from(self.age))
     }
 }
 

@@ -43,7 +43,7 @@ impl Prefix {
         if self.len > 63 {
             return self;
         }
-        let bit = (bit as u64 & 1) << (63 - self.len);
+        let bit = (u64::from(bit) & 1) << (63 - self.len);
         Prefix {
             bits: self.bits | bit,
             len: self.len + 1,
