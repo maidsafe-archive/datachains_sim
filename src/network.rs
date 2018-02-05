@@ -5,7 +5,7 @@ use node;
 use params::Params;
 use prefix::Prefix;
 use section::Section;
-use stats::{Distribution, Stats};
+use stats::{Aggregator, Distribution, Stats};
 use std::ops::AddAssign;
 
 pub struct Network {
@@ -61,7 +61,7 @@ impl Network {
             stats.rejections,
         );
 
-        let _ = self.validate();
+        self.validate();
     }
 
     pub fn stats(&self) -> &Stats {
@@ -76,7 +76,7 @@ impl Network {
             .count() as u64
     }
 
-    pub fn age_dist(&self) -> Distribution {
+    pub fn age_distribution(&self) -> Distribution {
         Distribution::new(
             self.sections
                 .values()
@@ -85,14 +85,23 @@ impl Network {
         )
     }
 
-    pub fn section_size_dist(&self) -> Distribution {
-        Distribution::new(self.sections.values().map(
+    pub fn age_aggregator(&self) -> Aggregator {
+        Aggregator::new(
+            self.sections
+                .values()
+                .flat_map(|section| section.nodes().values())
+                .map(|node| u64::from(node.age())),
+        )
+    }
+
+    pub fn section_size_aggregator(&self) -> Aggregator {
+        Aggregator::new(self.sections.values().map(
             |section| section.nodes().len() as u64,
         ))
     }
 
-    pub fn prefix_len_dist(&self) -> Distribution {
-        Distribution::new(self.sections.keys().map(|prefix| u64::from(prefix.len())))
+    pub fn prefix_len_aggregator(&self) -> Aggregator {
+        Aggregator::new(self.sections.keys().map(|prefix| u64::from(prefix.len())))
     }
 
 

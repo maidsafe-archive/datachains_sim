@@ -85,11 +85,12 @@ fn main() {
     println!("\n{:?}\n", params);
     println!("{}", network.stats().summary());
     println!("Age distribution:");
-    println!("{}", network.age_dist());
+    let age = network.age_distribution();
+    println!("{}\n{}", age, age.summary());
     println!("Section size distribution:");
-    println!("{}", network.section_size_dist());
+    println!("{}", network.section_size_aggregator());
     println!("Prefix length distribution:");
-    println!("{}", network.prefix_len_dist());
+    println!("{}", network.prefix_len_aggregator());
 
     if let Some(path) = params.file {
         network.stats().write_to_file(path);
@@ -214,18 +215,18 @@ fn get_params() -> Params {
 }
 
 fn print_tick_stats(network: &Network, max_prefix_len_diff: &mut u64) {
-    let prefix_len_dist = network.prefix_len_dist();
+    let prefix_len_agg = network.prefix_len_aggregator();
     *max_prefix_len_diff = cmp::max(
         *max_prefix_len_diff,
-        prefix_len_dist.max - prefix_len_dist.min,
+        prefix_len_agg.max - prefix_len_agg.min,
     );
 
     println!(
         "Header {:?}, AgeDist {:?}, SectionSizeDist {:?}, PrefixLenDist {:?}, MaxPrefixLenDiff: {}",
         network.stats().summary(),
-        network.age_dist(),
-        network.section_size_dist(),
-        prefix_len_dist,
+        network.age_aggregator(),
+        network.section_size_aggregator(),
+        prefix_len_agg,
         max_prefix_len_diff,
     )
 }
@@ -233,7 +234,7 @@ fn print_tick_stats(network: &Network, max_prefix_len_diff: &mut u64) {
 fn get_number<T: Number>(matches: &ArgMatches, name: &str) -> T {
     match matches.value_of(name).unwrap().parse() {
         Ok(value) => value,
-        Err(_) => panic!("{} must be a number.", name),
+        Err(_err) => panic!("{} must be a number.", name),
     }
 }
 

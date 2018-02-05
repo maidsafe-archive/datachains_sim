@@ -1,17 +1,26 @@
 use std::cmp;
+use std::collections::BTreeMap;
 use std::fmt;
 use std::fs::File;
 use std::io::Write;
 use std::path::Path;
 use std::u64;
 
-pub struct Distribution {
+pub struct Aggregator {
     pub min: u64,
     pub max: u64,
     pub avg: f64,
 }
 
-impl Distribution {
+impl Aggregator {
+    pub fn empty() -> Self {
+        Aggregator {
+            min: 0,
+            max: 0,
+            avg: 0.0,
+        }
+    }
+
     pub fn new<I>(values: I) -> Self
     where
         I: IntoIterator<Item = u64>,
@@ -31,22 +40,18 @@ impl Distribution {
                 num += 1;
             }
 
-            Distribution {
+            Aggregator {
                 min,
                 max,
                 avg: avg as f64 / f64::from(num),
             }
         } else {
-            Distribution {
-                min: 0,
-                max: 0,
-                avg: 0.0,
-            }
+            Self::empty()
         }
     }
 }
 
-impl fmt::Debug for Distribution {
+impl fmt::Debug for Aggregator {
     fn fmt(&self, fmt: &mut fmt::Formatter) -> fmt::Result {
         write!(
             fmt,
@@ -58,11 +63,58 @@ impl fmt::Debug for Distribution {
     }
 }
 
-impl fmt::Display for Distribution {
+impl fmt::Display for Aggregator {
     fn fmt(&self, fmt: &mut fmt::Formatter) -> fmt::Result {
         writeln!(fmt, "Min: {:6}", self.min)?;
         writeln!(fmt, "Max: {:6}", self.max)?;
         writeln!(fmt, "Avg: {:6.2}", self.avg)
+    }
+}
+
+pub struct Distribution(BTreeMap<u64, u64>);
+
+impl Distribution {
+    pub fn new<I>(values: I) -> Self
+    where
+        I: IntoIterator<Item = u64>,
+    {
+        let mut map = BTreeMap::new();
+
+        for value in values {
+            *map.entry(value).or_insert(0) += 1;
+        }
+
+        Distribution(map)
+    }
+
+    pub fn summary(&self) -> Aggregator {
+        if self.0.is_empty() {
+            return Aggregator::empty();
+        }
+
+        let mut avg = 0.0;
+        let mut num = 0;
+
+        for (&key, &value) in &self.0 {
+            avg += key as f64 * value as f64;
+            num += value;
+        }
+
+        Aggregator {
+            min: *self.0.keys().next().unwrap(),
+            max: *self.0.keys().last().unwrap(),
+            avg: avg / num as f64,
+        }
+    }
+}
+
+impl fmt::Display for Distribution {
+    fn fmt(&self, fmt: &mut fmt::Formatter) -> fmt::Result {
+        for (key, value) in &self.0 {
+            writeln!(fmt, "{:6}:\t{:6}", key, value)?;
+        }
+
+        Ok(())
     }
 }
 
@@ -139,6 +191,7 @@ impl Stats {
         }
     }
 
+    #[cfg_attr(feature = "cargo-clippy", allow(too_many_arguments))]
     pub fn record(
         &mut self,
         iteration: u64,
@@ -172,10 +225,8 @@ impl Stats {
     pub fn write_to_file<P: AsRef<Path>>(&self, path: P) {
         let path = path.as_ref();
 
-        let mut file = File::create(path).ok().expect(&format!(
-            "Couldn't create file {}!",
-            path.display()
-        ));
+        let mut file =
+            File::create(path).expect(&format!("Couldn't create file {}!", path.display()));
 
         for sample in &self.samples {
             let _ =
